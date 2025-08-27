@@ -1,5 +1,6 @@
 package com.Torn.FactionCrimes.ItemMarketModel;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 
@@ -13,6 +14,7 @@ public class ItemMarketResponse {
     }
 
     // Inner wrapper for the nested structure
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ItemWrapper {
         @JsonProperty("item")
         private Item item;
