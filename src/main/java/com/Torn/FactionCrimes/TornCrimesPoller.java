@@ -18,7 +18,7 @@ import okhttp3.*;
 public class TornCrimesPoller {
     private static final Logger logger = LoggerFactory.getLogger(TornCrimesPoller.class);
     private static final String TORN_API_URL = "https://api.torn.com/v2/faction/crimes?cat=available&offset=0&sort=DESC";
-    private static final String API_KEY = System.getenv("TORN_API_KEY"); // Store API key in environment variable
+    private static final String API_KEY = System.getenv("TORN_API_KEY");
 
     public static void main(String[] args) {
         if (API_KEY == null || API_KEY.isEmpty()) {
@@ -41,7 +41,7 @@ public class TornCrimesPoller {
                     .withIdentity("crimesTrigger", "torn")
                     .startNow()
                     .withSchedule(SimpleScheduleBuilder.simpleSchedule()
-                            .withIntervalInMinutes(5) // Poll every 5 minutes
+                            .withIntervalInMinutes(5)
                             .repeatForever())
                     .build();
 
@@ -51,7 +51,7 @@ public class TornCrimesPoller {
 
             // Keep the application running
             while (true) {
-                Thread.sleep(60000); // Sleep for 1 minute
+                Thread.sleep(60000);
             }
 
         } catch (Exception e) {
@@ -60,7 +60,6 @@ public class TornCrimesPoller {
         }
     }
 
-    // Job implementation
     public static class CrimesPollingJob implements Job {
         private static final Logger logger = LoggerFactory.getLogger(CrimesPollingJob.class);
         private static final OkHttpClient client = new OkHttpClient();
@@ -114,10 +113,8 @@ public class TornCrimesPoller {
             }
 
             try (Connection conn = DriverManager.getConnection(databaseUrl)) {
-                // Create tables if they don't exist
                 createTablesIfNotExist(conn);
 
-                // Process each crime
                 for (Crime crime : crimesResponse.getCrimes()) {
                     processCrime(conn, crime);
                 }
@@ -128,44 +125,40 @@ public class TornCrimesPoller {
 
         private void createTablesIfNotExist(Connection conn) throws SQLException {
             // Create crimes table
-            String createCrimesTable = """
-                CREATE TABLE IF NOT EXISTS crimes (
-                    id BIGINT PRIMARY KEY,
-                    previous_crime_id BIGINT,
-                    name VARCHAR(255) NOT NULL,
-                    difficulty INTEGER,
-                    status VARCHAR(50),
-                    created_at TIMESTAMP,
-                    planning_at TIMESTAMP,
-                    executed_at TIMESTAMP,
-                    ready_at TIMESTAMP,
-                    expired_at TIMESTAMP,
-                    rewards TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """;
+            String createCrimesTable = "CREATE TABLE IF NOT EXISTS crimes (" +
+                    "id BIGINT PRIMARY KEY," +
+                    "previous_crime_id BIGINT," +
+                    "name VARCHAR(255) NOT NULL," +
+                    "difficulty INTEGER," +
+                    "status VARCHAR(50)," +
+                    "created_at TIMESTAMP," +
+                    "planning_at TIMESTAMP," +
+                    "executed_at TIMESTAMP," +
+                    "ready_at TIMESTAMP," +
+                    "expired_at TIMESTAMP," +
+                    "rewards TEXT," +
+                    "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                    ")";
 
             // Create slots table
-            String createSlotsTable = """
-                CREATE TABLE IF NOT EXISTS crime_slots (
-                    id SERIAL PRIMARY KEY,
-                    crime_id BIGINT NOT NULL,
-                    position VARCHAR(100),
-                    position_id VARCHAR(10),
-                    position_number INTEGER,
-                    checkpoint_pass_rate INTEGER,
-                    item_requirement_id BIGINT,
-                    item_is_reusable BOOLEAN,
-                    item_is_available BOOLEAN,
-                    user_id BIGINT,
-                    user_outcome VARCHAR(50),
-                    user_joined_at TIMESTAMP,
-                    user_progress DOUBLE PRECISION,
-                    user_item_outcome VARCHAR(50),
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (crime_id) REFERENCES crimes(id) ON DELETE CASCADE
-                )
-                """;
+            String createSlotsTable = "CREATE TABLE IF NOT EXISTS crime_slots (" +
+                    "id SERIAL PRIMARY KEY," +
+                    "crime_id BIGINT NOT NULL," +
+                    "position VARCHAR(100)," +
+                    "position_id VARCHAR(10)," +
+                    "position_number INTEGER," +
+                    "checkpoint_pass_rate INTEGER," +
+                    "item_requirement_id BIGINT," +
+                    "item_is_reusable BOOLEAN," +
+                    "item_is_available BOOLEAN," +
+                    "user_id BIGINT," +
+                    "user_outcome VARCHAR(50)," +
+                    "user_joined_at TIMESTAMP," +
+                    "user_progress DOUBLE PRECISION," +
+                    "user_item_outcome VARCHAR(50)," +
+                    "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                    "FOREIGN KEY (crime_id) REFERENCES crimes(id) ON DELETE CASCADE" +
+                    ")";
 
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute(createCrimesTable);
@@ -183,17 +176,15 @@ public class TornCrimesPoller {
 
         private void processCrime(Connection conn, Crime crime) throws SQLException {
             // Insert or update crime
-            String upsertCrimeSQL = """
-                INSERT INTO crimes (id, previous_crime_id, name, difficulty, status, created_at, 
-                                  planning_at, executed_at, ready_at, expired_at, rewards, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TEXT, CURRENT_TIMESTAMP)
-                ON CONFLICT (id) DO UPDATE SET
-                    status = EXCLUDED.status,
-                    planning_at = EXCLUDED.planning_at,
-                    executed_at = EXCLUDED.executed_at,
-                    ready_at = EXCLUDED.ready_at,
-                    last_updated = CURRENT_TIMESTAMP
-                """;
+            String upsertCrimeSQL = "INSERT INTO crimes (id, previous_crime_id, name, difficulty, status, created_at, " +
+                    "planning_at, executed_at, ready_at, expired_at, rewards, last_updated) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TEXT, CURRENT_TIMESTAMP) " +
+                    "ON CONFLICT (id) DO UPDATE SET " +
+                    "status = EXCLUDED.status, " +
+                    "planning_at = EXCLUDED.planning_at, " +
+                    "executed_at = EXCLUDED.executed_at, " +
+                    "ready_at = EXCLUDED.ready_at, " +
+                    "last_updated = CURRENT_TIMESTAMP";
 
             try (PreparedStatement crimeStmt = conn.prepareStatement(upsertCrimeSQL)) {
                 crimeStmt.setLong(1, crime.getId());
@@ -219,13 +210,11 @@ public class TornCrimesPoller {
 
             // Insert slots
             if (crime.getSlots() != null) {
-                String insertSlotSQL = """
-                    INSERT INTO crime_slots (crime_id, position, position_id, position_number, 
-                                           checkpoint_pass_rate, item_requirement_id, item_is_reusable, 
-                                           item_is_available, user_id, user_outcome, user_joined_at, 
-                                           user_progress, user_item_outcome, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """;
+                String insertSlotSQL = "INSERT INTO crime_slots (crime_id, position, position_id, position_number, " +
+                        "checkpoint_pass_rate, item_requirement_id, item_is_reusable, " +
+                        "item_is_available, user_id, user_outcome, user_joined_at, " +
+                        "user_progress, user_item_outcome, last_updated) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
                 try (PreparedStatement slotStmt = conn.prepareStatement(insertSlotSQL)) {
                     for (Slot slot : crime.getSlots()) {
