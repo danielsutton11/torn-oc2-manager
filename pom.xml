@@ -31,14 +31,7 @@
             <version>2.3.2</version>
         </dependency>
 
-        <!-- SLF4J for logging -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>2.0.9</version>
-        </dependency>
-
-        <!-- OR use Logback instead (better option) -->
+        <!-- Remove slf4j-simple and use logback instead -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
@@ -74,7 +67,6 @@
     </dependencies>
 
     <build>
-        <finalName>torn-crimes-poller</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -86,30 +78,54 @@
                 </configuration>
             </plugin>
 
-            <!-- Maven Assembly Plugin - more reliable for dependencies -->
+            <!-- Maven Dependency Plugin to copy dependencies -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
+                <artifactId>maven-dependency-plugin</artifactId>
                 <version>3.6.0</version>
-                <configuration>
-                    <descriptorRefs>
-                        <descriptorRef>jar-with-dependencies</descriptorRef>
-                    </descriptorRefs>
-                    <archive>
-                        <manifest>
-                            <mainClass>com.Torn.FactionCrimes.TornCrimesPoller</mainClass>
-                        </manifest>
-                    </archive>
-                    <finalName>torn-crimes-poller</finalName>
-                    <appendAssemblyId>false</appendAssemblyId>
-                </configuration>
                 <executions>
                     <execution>
-                        <id>make-assembly</id>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Plugin to create executable JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
                         <phase>package</phase>
                         <goals>
-                            <goal>single</goal>
+                            <goal>shade</goal>
                         </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.Torn.FactionCrimes.TornCrimesPoller</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <finalName>torn-crimes-poller</finalName>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

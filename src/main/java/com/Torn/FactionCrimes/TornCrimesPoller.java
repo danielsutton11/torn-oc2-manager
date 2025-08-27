@@ -44,6 +44,12 @@ public class TornCrimesPoller {
     }
 
     public static void main(String[] args) {
+
+        logger.info("Application starting...");
+        logger.info("TORN_API_KEY present: {}", (API_KEY != null && !API_KEY.isEmpty()));
+        logger.info("DATABASE_URL present: {}", (System.getenv("DATABASE_URL") != null));
+        logger.info("Polling interval: {} minutes", POLLING_INTERVAL_MINUTES);
+
         // Explicitly load PostgreSQL JDBC driver
         try {
             Class.forName("org.postgresql.Driver");
