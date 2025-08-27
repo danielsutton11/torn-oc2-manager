@@ -182,15 +182,25 @@ public class TornCrimesPoller {
                 return;
             }
 
-            // The DATABASE_URL from Railway is already in the correct format
-            // Just ensure it has the jdbc: prefix if missing
+            String jdbcUrl = databaseUrl;
+            String user = null;
+            String password = null;
+
             if (databaseUrl.startsWith("postgresql://")) {
-                databaseUrl = "jdbc:" + databaseUrl;
+                // Remove 'postgresql://' and parse manually
+                String cleaned = databaseUrl.substring("postgresql://".length());
+                String[] parts = cleaned.split("@");
+                String[] userInfo = parts[0].split(":");
+                user = userInfo[0];
+                password = userInfo[1];
+
+                jdbcUrl = "jdbc:postgresql://" + parts[1];
             }
 
+            // Log safe version of the URL
             logger.info("Attempting to connect to database...");
 
-            try (Connection conn = DriverManager.getConnection(databaseUrl)) {
+            try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password)) {
                 logger.info("Database connection successful");
                 createTablesIfNotExist(conn);
 
@@ -201,7 +211,7 @@ public class TornCrimesPoller {
                 logger.info("Successfully stored crimes data in database");
             } catch (SQLException e) {
                 logger.error("Database connection failed. URL format: {}",
-                        databaseUrl.replaceAll(":[^:/@]+@", ":***@"));
+                        jdbcUrl.replaceAll(":[^:/@]+@", ":***@"));
                 throw e;
             }
         }
