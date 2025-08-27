@@ -8,12 +8,22 @@ import org.quartz.impl.StdSchedulerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.*;
+// SQL imports - be specific
 import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.sql.Types;
+
+// Other imports
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.io.IOException;
 import okhttp3.*;
+
+
 
 public class TornCrimesPoller {
     private static final Logger logger = LoggerFactory.getLogger(TornCrimesPoller.class);
@@ -34,6 +44,15 @@ public class TornCrimesPoller {
     }
 
     public static void main(String[] args) {
+        // Explicitly load PostgreSQL JDBC driver
+        try {
+            Class.forName("org.postgresql.Driver");
+            logger.info("PostgreSQL JDBC driver loaded successfully");
+        } catch (ClassNotFoundException e) {
+            logger.error("PostgreSQL JDBC driver not found in classpath", e);
+            System.exit(1);
+        }
+
         if (API_KEY == null || API_KEY.isEmpty()) {
             logger.error("TORN_API_KEY environment variable not set");
             System.exit(1);
@@ -157,7 +176,15 @@ public class TornCrimesPoller {
                 return;
             }
 
+            // Fix the connection string format for JDBC
+            if (!databaseUrl.startsWith("jdbc:")) {
+                databaseUrl = "jdbc:" + databaseUrl;
+            }
+
+            logger.info("Attempting to connect to database...");
+
             try (Connection conn = DriverManager.getConnection(databaseUrl)) {
+                logger.info("Database connection successful");
                 createTablesIfNotExist(conn);
 
                 for (Crime crime : crimesResponse.getCrimes()) {
@@ -165,6 +192,9 @@ public class TornCrimesPoller {
                 }
 
                 logger.info("Successfully stored crimes data in database");
+            } catch (SQLException e) {
+                logger.error("Database connection failed. URL format: {}", databaseUrl.replaceAll(":[^:/@]+@", ":***@"));
+                throw e;
             }
         }
 
