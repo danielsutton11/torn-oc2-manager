@@ -1,8 +1,10 @@
 package com.Torn.FactionCrimes.ItemMarketModel;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-public class ItemMarket {
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class Item {
 
     @JsonProperty("id")
     private Long id;

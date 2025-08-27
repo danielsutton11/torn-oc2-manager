@@ -2,7 +2,7 @@ package com.Torn.FactionCrimes;
 
 import com.Torn.FactionCrimes.CrimesModel.*;
 import com.Torn.FactionCrimes.Helpers.Constants;
-import com.Torn.FactionCrimes.ItemMarketModel.ItemMarket;
+import com.Torn.FactionCrimes.ItemMarketModel.Item;
 import com.Torn.FactionCrimes.ItemMarketModel.ItemMarketResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -262,7 +262,7 @@ public class AvailableCrimesPoller {
             }
         }
 
-        private final ConcurrentHashMap<Long, ItemMarket> itemCache = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<Long, Item> itemCache = new ConcurrentHashMap<>();
 
         private void processCrime(Connection conn, Crime crime) throws SQLException {
             // Delete existing rows for this crime (in case of update)
@@ -322,7 +322,7 @@ public class AvailableCrimesPoller {
                         stmt.setObject(11, itemId);
 
                         // Use cache if available
-                        ItemMarket itemMarket = itemCache.computeIfAbsent(itemId, this::fetchItemMarketSafe);
+                        Item itemMarket = itemCache.computeIfAbsent(itemId, this::fetchItemMarketSafe);
 
                         if (itemMarket != null) {
                             stmt.setString(12, itemMarket.getName());
@@ -374,7 +374,7 @@ public class AvailableCrimesPoller {
             }
         }
 
-        private ItemMarket fetchItemMarketSafe(Long itemId) {
+        private Item fetchItemMarketSafe(Long itemId) {
             try {
                 ItemMarketResponse response = fetchItemInfo(itemId);
                 return response != null ? response.getItemMarket() : null;
