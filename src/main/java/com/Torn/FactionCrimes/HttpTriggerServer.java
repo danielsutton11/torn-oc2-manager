@@ -14,10 +14,10 @@ import java.util.concurrent.Executors;
 public class HttpTriggerServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpTriggerServer.class);
     private static final int DEFAULT_PORT = 8080;
-    private final TornCrimesPoller.CrimesPollingJob pollingJob;
+    private final AvailableCrimesPoller.CrimesPollingJob pollingJob;
     private HttpServer server;
 
-    public HttpTriggerServer(TornCrimesPoller.CrimesPollingJob pollingJob) {
+    public HttpTriggerServer(AvailableCrimesPoller.CrimesPollingJob pollingJob) {
         this.pollingJob = pollingJob;
     }
 

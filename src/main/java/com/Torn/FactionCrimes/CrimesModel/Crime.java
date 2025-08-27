@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.model;
+package com.Torn.FactionCrimes.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
@@ -45,95 +45,48 @@ public class Crime {
         return id;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public Long getPreviousCrimeId() {
         return previousCrimeId;
-    }
-
-    public void setPreviousCrimeId(Long previousCrimeId) {
-        this.previousCrimeId = previousCrimeId;
     }
 
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public Integer getDifficulty() {
         return difficulty;
-    }
-
-    public void setDifficulty(Integer difficulty) {
-        this.difficulty = difficulty;
     }
 
     public String getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
     public Long getCreatedAt() {
         return createdAt;
-    }
-
-    public void setCreatedAt(Long createdAt) {
-        this.createdAt = createdAt;
     }
 
     public Long getPlanningAt() {
         return planningAt;
     }
 
-    public void setPlanningAt(Long planningAt) {
-        this.planningAt = planningAt;
-    }
-
     public Long getExecutedAt() {
         return executedAt;
-    }
-
-    public void setExecutedAt(Long executedAt) {
-        this.executedAt = executedAt;
     }
 
     public Long getReadyAt() {
         return readyAt;
     }
 
-    public void setReadyAt(Long readyAt) {
-        this.readyAt = readyAt;
-    }
-
     public Long getExpiredAt() {
         return expiredAt;
-    }
-
-    public void setExpiredAt(Long expiredAt) {
-        this.expiredAt = expiredAt;
     }
 
     public List<Slot> getSlots() {
         return slots;
     }
 
-    public void setSlots(List<Slot> slots) {
-        this.slots = slots;
-    }
-
     public Object getRewards() {
         return rewards;
     }
 
-    public void setRewards(Object rewards) {
-        this.rewards = rewards;
-    }
 }

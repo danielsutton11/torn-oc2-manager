@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.model;
+package com.Torn.FactionCrimes.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -34,39 +34,20 @@ public class Slot {
         return positionId;
     }
 
-    public void setPositionId(String positionId) {
-        this.positionId = positionId;
-    }
-
     public Integer getPositionNumber() {
         return positionNumber;
-    }
-
-    public void setPositionNumber(Integer positionNumber) {
-        this.positionNumber = positionNumber;
     }
 
     public ItemRequirement getItemRequirement() {
         return itemRequirement;
     }
 
-    public void setItemRequirement(ItemRequirement itemRequirement) {
-        this.itemRequirement = itemRequirement;
-    }
-
     public SlotUser getUser() {
         return user;
-    }
-
-    public void setUser(SlotUser user) {
-        this.user = user;
     }
 
     public Integer getCheckpointPassRate() {
         return checkpointPassRate;
     }
 
-    public void setCheckpointPassRate(Integer checkpointPassRate) {
-        this.checkpointPassRate = checkpointPassRate;
-    }
 }

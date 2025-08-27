@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.model;
+package com.Torn.FactionCrimes.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -23,39 +23,20 @@ public class SlotUser {
         return outcome;
     }
 
-    public void setOutcome(String outcome) {
-        this.outcome = outcome;
-    }
-
     public Long getId() {
         return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
     }
 
     public Long getJoinedAt() {
         return joinedAt;
     }
 
-    public void setJoinedAt(Long joinedAt) {
-        this.joinedAt = joinedAt;
-    }
-
     public Double getProgress() {
         return progress;
-    }
-
-    public void setProgress(Double progress) {
-        this.progress = progress;
     }
 
     public String getItemOutcome() {
         return itemOutcome;
     }
 
-    public void setItemOutcome(String itemOutcome) {
-        this.itemOutcome = itemOutcome;
-    }
 }

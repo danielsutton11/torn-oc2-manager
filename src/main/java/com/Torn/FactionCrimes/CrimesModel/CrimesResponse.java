@@ -1,9 +1,9 @@
-package com.Torn.FactionCrimes.model;
+package com.Torn.FactionCrimes.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
-public class TornCrimesResponse {
+public class CrimesResponse {
     @JsonProperty("crimes")
     private List<Crime> crimes;
 

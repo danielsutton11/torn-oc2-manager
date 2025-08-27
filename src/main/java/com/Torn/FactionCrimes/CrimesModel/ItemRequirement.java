@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.model;
+package com.Torn.FactionCrimes.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -17,23 +17,12 @@ public class ItemRequirement {
         return id;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public Boolean getIsReusable() {
         return isReusable;
-    }
-
-    public void setIsReusable(Boolean isReusable) {
-        this.isReusable = isReusable;
     }
 
     public Boolean getIsAvailable() {
         return isAvailable;
     }
 
-    public void setIsAvailable(Boolean isAvailable) {
-        this.isAvailable = isAvailable;
-    }
 }
