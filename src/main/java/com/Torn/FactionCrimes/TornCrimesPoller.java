@@ -19,6 +19,19 @@ public class TornCrimesPoller {
     private static final Logger logger = LoggerFactory.getLogger(TornCrimesPoller.class);
     private static final String TORN_API_URL = "https://api.torn.com/v2/faction/crimes?cat=available&offset=0&sort=DESC";
     private static final String API_KEY = System.getenv("TORN_API_KEY");
+    private static final int POLLING_INTERVAL_MINUTES = getPollingInterval();
+
+    private static int getPollingInterval() {
+        String interval = System.getenv("POLLING_INTERVAL_MINUTES");
+        if (interval != null && !interval.isEmpty()) {
+            try {
+                return Integer.parseInt(interval);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid POLLING_INTERVAL_MINUTES value: {}. Using default 5 minutes.", interval);
+            }
+        }
+        return 5; // Default to 5 minutes
+    }
 
     public static void main(String[] args) {
         if (API_KEY == null || API_KEY.isEmpty()) {
@@ -26,7 +39,28 @@ public class TornCrimesPoller {
             System.exit(1);
         }
 
+        // Check for immediate run request
+        if (args.length > 0 && "run-now".equals(args[0])) {
+            logger.info("Running immediate data fetch...");
+            CrimesPollingJob job = new CrimesPollingJob();
+            try {
+                job.execute(null);
+                logger.info("Immediate fetch completed successfully");
+                System.exit(0);
+            } catch (JobExecutionException e) {
+                logger.error("Immediate fetch failed", e);
+                System.exit(1);
+            }
+        }
+
         try {
+            // Create shared polling job instance
+            CrimesPollingJob pollingJobInstance = new CrimesPollingJob();
+
+            // Start HTTP server for manual triggers
+            HttpTriggerServer httpServer = new HttpTriggerServer(pollingJobInstance);
+            httpServer.start();
+
             // Create Quartz scheduler
             Scheduler scheduler = StdSchedulerFactory.getDefaultScheduler();
             scheduler.start();
@@ -36,18 +70,29 @@ public class TornCrimesPoller {
                     .withIdentity("crimesPollingJob", "torn")
                     .build();
 
-            // Define trigger - runs every 5 minutes
+            // Define trigger with configurable interval
             Trigger trigger = TriggerBuilder.newTrigger()
                     .withIdentity("crimesTrigger", "torn")
                     .startNow()
                     .withSchedule(SimpleScheduleBuilder.simpleSchedule()
-                            .withIntervalInMinutes(5)
+                            .withIntervalInMinutes(POLLING_INTERVAL_MINUTES)
                             .repeatForever())
                     .build();
 
             // Schedule the job
             scheduler.scheduleJob(job, trigger);
-            logger.info("Torn crimes polling job scheduled successfully. Polling every 5 minutes.");
+            logger.info("Torn crimes polling job scheduled successfully. Polling every {} minutes.", POLLING_INTERVAL_MINUTES);
+
+            // Shutdown hook to clean up resources
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                logger.info("Shutting down application...");
+                try {
+                    scheduler.shutdown();
+                    httpServer.stop();
+                } catch (Exception e) {
+                    logger.error("Error during shutdown", e);
+                }
+            }));
 
             // Keep the application running
             while (true) {

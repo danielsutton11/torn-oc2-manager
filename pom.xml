@@ -38,6 +38,13 @@
             <version>2.0.9</version>
         </dependency>
 
+        <!-- OR use Logback instead (better option) -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.4.12</version>
+        </dependency>
+
         <!-- HTTP Client for API calls -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
