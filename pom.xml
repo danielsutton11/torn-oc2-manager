@@ -78,6 +78,23 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Dependency Plugin to copy dependencies -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Plugin to create executable JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

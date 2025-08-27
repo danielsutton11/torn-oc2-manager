@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "java -cp target/classes:target/dependency/* com.Torn.FactionCrimes.TornCrimesPoller",
+    "startCommand": "java -jar target/torn-crimes-poller.jar",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
