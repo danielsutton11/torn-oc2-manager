@@ -50,6 +50,10 @@ public class TornCrimesPoller {
         logger.info("DATABASE_URL present: {}", (System.getenv("DATABASE_URL") != null));
         logger.info("Polling interval: {} minutes", POLLING_INTERVAL_MINUTES);
 
+        System.out.println("=== SO APPLICATION STARTING ===");
+        System.out.println("SO API KEY present: " + (API_KEY != null && !API_KEY.isEmpty()));
+        System.out.println("SO DATABASE_URL present: " + (System.getenv("DATABASE_URL") != null));
+
         // Explicitly load PostgreSQL JDBC driver
         try {
             Class.forName("org.postgresql.Driver");
