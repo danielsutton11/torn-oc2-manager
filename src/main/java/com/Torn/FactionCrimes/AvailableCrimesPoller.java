@@ -41,7 +41,7 @@ public class AvailableCrimesPoller {
 
         logger.info("Application starting...");
         logger.info("TORN_API_KEY present: {}", (System.getenv(Constants.TORN_LIMITED_API_KEY) != null && !System.getenv(Constants.TORN_LIMITED_API_KEY).isEmpty()));
-        logger.info("DATABASE_URL present: {}", (System.getenv("DATABASE_URL") != null));
+        logger.info("DATABASE_URL present: {}", (System.getenv(Constants.DATABASE_URL) != null));
         logger.info("Polling interval: {} minutes", POLLING_INTERVAL_MINUTES);
 
         // Explicitly load PostgreSQL JDBC driver
@@ -229,7 +229,7 @@ public class AvailableCrimesPoller {
         }
 
         private void createTablesIfNotExist(Connection conn) throws SQLException {
-            String createUnifiedTable = "CREATE TABLE IF NOT EXISTS Available_Faction_Crimes/Slots (" +
+            String createUnifiedTable = "CREATE TABLE IF NOT EXISTS Available_Faction_Crimes_Slots (" +
                     "crime_id BIGINT," +
                     "name VARCHAR(255) NOT NULL," +
                     "difficulty INTEGER," +
@@ -255,8 +255,8 @@ public class AvailableCrimesPoller {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute(createUnifiedTable);
 
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_faction_crimes_status ON faction_crimes(status)");
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_faction_crimes_created_at ON faction_crimes(created_at)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_available_faction_crimes_status ON Available_Faction_Crimes_Slots(status)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_available_faction_crimes_created_at ON Available_Faction_Crimes_Slots(created_at)");
 
                 logger.info("Unified faction_crimes table created or verified");
             }
@@ -266,7 +266,7 @@ public class AvailableCrimesPoller {
 
         private void processCrime(Connection conn, Crime crime) throws SQLException {
             // Delete existing rows for this crime (in case of update)
-            try (PreparedStatement delete = conn.prepareStatement("DELETE FROM faction_crimes WHERE crime_id = ?")) {
+            try (PreparedStatement delete = conn.prepareStatement("DELETE FROM Available_Faction_Crimes_Slots WHERE crime_id = ?")) {
                 delete.setLong(1, crime.getId());
                 delete.executeUpdate();
             }
@@ -276,7 +276,7 @@ public class AvailableCrimesPoller {
                 return;
             }
 
-            String insertSQL = "INSERT INTO Available_Faction_Crimes/Slots (" +
+            String insertSQL = "INSERT INTO Available_Faction_Crimes_Slots (" +
                     "crime_id, name, difficulty, status, created_at, ready_at, expired_at, " + // 1-7
                     "slot_position, slot_position_id, slot_position_number, " +                // 8-10
                     "item_required_id, item_required_name, item_required_avg_cost, item_is_reusable, " + // 11-14
