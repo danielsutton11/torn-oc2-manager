@@ -50,10 +50,6 @@ public class TornCrimesPoller {
         logger.info("DATABASE_URL present: {}", (System.getenv("DATABASE_URL") != null));
         logger.info("Polling interval: {} minutes", POLLING_INTERVAL_MINUTES);
 
-        System.out.println("=== SO APPLICATION STARTING ===");
-        System.out.println("SO API KEY present: " + (API_KEY != null && !API_KEY.isEmpty()));
-        System.out.println("SO DATABASE_URL present: " + (System.getenv("DATABASE_URL") != null));
-
         // Explicitly load PostgreSQL JDBC driver
         try {
             Class.forName("org.postgresql.Driver");
@@ -186,8 +182,9 @@ public class TornCrimesPoller {
                 return;
             }
 
-            // Fix the connection string format for JDBC
-            if (!databaseUrl.startsWith("jdbc:")) {
+            // The DATABASE_URL from Railway is already in the correct format
+            // Just ensure it has the jdbc: prefix if missing
+            if (databaseUrl.startsWith("postgresql://")) {
                 databaseUrl = "jdbc:" + databaseUrl;
             }
 
@@ -203,7 +200,8 @@ public class TornCrimesPoller {
 
                 logger.info("Successfully stored crimes data in database");
             } catch (SQLException e) {
-                logger.error("Database connection failed. URL format: {}", databaseUrl.replaceAll(":[^:/@]+@", ":***@"));
+                logger.error("Database connection failed. URL format: {}",
+                        databaseUrl.replaceAll(":[^:/@]+@", ":***@"));
                 throw e;
             }
         }
