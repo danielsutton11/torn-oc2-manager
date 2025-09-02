@@ -31,14 +31,12 @@ public class Execute {
             System.exit(1);
         }
 
-        String jobCode = Constants.JOB_GET_FACTION_MEMBERS;
-
-//        String jobCode = getJobCode();
-//        if (jobCode == null) {
-//            logger.error("Execute_Job environment variable not set.");
-//            cleanup();
-//            System.exit(1);
-//        }
+        String jobCode = getJobCode();
+        if (jobCode == null) {
+            logger.error("Execute_Job environment variable not set.");
+            cleanup();
+            System.exit(1);
+        }
 
         try {
             switch (jobCode) {
