@@ -20,8 +20,33 @@ public class Postgres {
      * Get a connection using HikariCP connection pooling
      */
     public Connection connect(String databaseUrl, Logger logger) throws SQLException {
-        HikariDataSource dataSource = getOrCreateDataSource(databaseUrl, logger);
-        return dataSource.getConnection();
+
+        String jdbcUrl = databaseUrl;
+        String user = null;
+        String password = null;
+
+        if (databaseUrl.startsWith(Constants.POSTGRES_URL)) {
+            String cleaned = databaseUrl.substring(Constants.POSTGRES_URL.length());
+            String[] parts = cleaned.split("@");
+            String[] userInfo = parts[0].split(":");
+            user = userInfo[0];
+            password = userInfo[1];
+
+            jdbcUrl = Constants.POSTGRES_JDBC_URL + parts[1];
+        }
+
+        logger.info("Attempting to connect to database...");
+
+        try {
+            Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
+            logger.info("Database connection successful");
+            return conn;
+
+        } catch (SQLException e) {
+            logger.error("Database connection failed. URL format: {}",
+                    jdbcUrl.replaceAll(":[^:/@]+@", ":***@"));
+            throw e;
+        }
     }
 
     public Connection connectSimple(String databaseUrl, Logger logger) throws SQLException {

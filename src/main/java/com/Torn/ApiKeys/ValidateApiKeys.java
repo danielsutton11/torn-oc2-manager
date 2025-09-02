@@ -38,7 +38,7 @@ public class ValidateApiKeys {
         }
 
         logger.info("Connecting to database...");
-        try (Connection connection = Execute.postgres.connectSimple(databaseUrl, logger)) {
+        try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
             logger.info("Database connection established successfully");
 
             // Test connection first
