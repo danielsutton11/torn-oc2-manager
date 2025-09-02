@@ -29,7 +29,7 @@
                   <mainClass>com.Torn.Execute</mainClass>
                 </transformer>
               </transformers>
-              <finalName>torn-crimes-poller</finalName>
+              <finalName>torn-organised-crimes-manager</finalName>
             </configuration>
           </execution>
         </executions>
