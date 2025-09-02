@@ -25,17 +25,15 @@ public class Postgres {
     }
 
     public Connection connectSimple(String databaseUrl, Logger logger) throws SQLException {
-        String jdbcUrl = convertToJdbcUrl(databaseUrl);
+        // Convert postgresql:// to jdbc:postgresql://
+        String jdbcUrl = databaseUrl.startsWith("postgresql://")
+                ? databaseUrl.replace("postgresql://", "jdbc:postgresql://")
+                : databaseUrl;
+
         logger.info("Creating simple database connection to: {}", maskDatabaseUrl(jdbcUrl));
 
-        // Set connection properties for faster timeouts
-        Properties props = new Properties();
-        props.setProperty("socketTimeout", "10");
-        props.setProperty("loginTimeout", "10");
-        props.setProperty("connectTimeout", "10");
-
         try {
-            Connection conn = DriverManager.getConnection(jdbcUrl, props);
+            Connection conn = DriverManager.getConnection(jdbcUrl);
             logger.info("Simple database connection successful");
             return conn;
         } catch (SQLException e) {
@@ -103,24 +101,28 @@ public class Postgres {
             return databaseUrl.replace("postgresql://", "jdbc:postgresql://");
         }
 
-        // Handle the old parsing logic for backwards compatibility
         if (databaseUrl.startsWith(Constants.POSTGRES_URL)) {
-            String cleaned = databaseUrl.substring(Constants.POSTGRES_URL.length());
-            String[] parts = cleaned.split("@", 2); // Limit to 2 parts in case @ appears in password
+            // Parse: postgresql://user:pass@host:port/database
+            String withoutProtocol = databaseUrl.substring("postgresql://".length());
 
+            // Split on @ to separate credentials from host
+            String[] parts = withoutProtocol.split("@", 2);
             if (parts.length != 2) {
-                throw new IllegalArgumentException("Invalid PostgreSQL URL format");
+                throw new IllegalArgumentException("Invalid PostgreSQL URL format - missing @");
             }
 
-            String[] userInfo = parts[0].split(":", 2); // Limit to 2 parts in case : appears in password
-            if (userInfo.length != 2) {
+            String credentials = parts[0]; // user:password
+            String hostAndDb = parts[1];   // host:port/database
+
+            String[] credParts = credentials.split(":", 2);
+            if (credParts.length != 2) {
                 throw new IllegalArgumentException("Invalid PostgreSQL URL - missing user:password");
             }
 
-            String user = userInfo[0];
-            String password = userInfo[1];
-            String hostAndDb = parts[1];
+            String user = credParts[0];
+            String password = credParts[1];
 
+            // Return proper JDBC URL
             return String.format("jdbc:postgresql://%s?user=%s&password=%s", hostAndDb, user, password);
         }
 
