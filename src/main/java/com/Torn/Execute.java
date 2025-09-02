@@ -3,6 +3,7 @@ package com.Torn;
 import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
 import com.Torn.Helpers.HttpTriggerServer;
+import com.Torn.Postgres.Postgres; // Add this import
 import org.quartz.*;
 import org.quartz.impl.StdSchedulerFactory;
 import org.slf4j.Logger;
@@ -33,6 +34,7 @@ public class Execute {
         String jobCode = getJobCode();
         if (jobCode == null) {
             logger.error("Execute_Job environment variable not set.");
+            cleanup();
             System.exit(1);
         }
 
@@ -64,15 +66,18 @@ public class Execute {
                     break;
                 default:
                     logger.error("Unknown job code: {}", jobCode);
+                    cleanup();
                     System.exit(1);
             }
 
             logger.info("Job {} completed successfully", jobCode);
-            System.exit(0); // Explicit success exit for cron jobs
+            cleanup(); // Clean up before successful exit
+            System.exit(0);
 
         } catch (Exception e) {
             logger.error("Job {} failed", jobCode, e);
-            System.exit(1); // Explicit failure exit for cron jobs
+            cleanup(); // Clean up before error exit
+            System.exit(1);
         }
     }
 
@@ -81,7 +86,17 @@ public class Execute {
         return (jobCode != null && !jobCode.isEmpty()) ? jobCode : null;
     }
 
-
+    /**
+     * Clean up resources before application exit
+     */
+    private static void cleanup() {
+        try {
+            logger.info("Cleaning up resources...");
+            Postgres.cleanup(); // Close all database connection pools
+        } catch (Exception e) {
+            logger.warn("Error during cleanup: {}", e.getMessage());
+        }
+    }
 
 //        if (System.getenv(Constants.TORN_LIMITED_API_KEY) == null || System.getenv(Constants.TORN_LIMITED_API_KEY).isEmpty()) {
 //            logger.error("TORN_API_KEY environment variable not set");

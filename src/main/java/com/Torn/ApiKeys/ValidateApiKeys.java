@@ -2,8 +2,6 @@ package com.Torn.ApiKeys;
 
 import com.Torn.Helpers.Constants;
 import com.Torn.Postgres.Postgres;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -17,56 +15,108 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);
-    private static final OkHttpClient client = new OkHttpClient();
 
-    private static final HikariDataSource dataSource = createDataSource();
+    private static final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build();
 
-    private static HikariDataSource createDataSource() {
-        String databaseUrl = System.getenv(Constants.DATABASE_URL);
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(databaseUrl);
-        config.setMaximumPoolSize(5);
-        config.setConnectionTimeout(30000);
-        return new HikariDataSource(config);
-    }
+    private static final int RATE_LIMIT_DELAY_MS = 2000; // 2 seconds between API calls
+    private static final Postgres postgres = new Postgres();
 
     public static void Validate() throws SQLException, IOException {
-        try (Connection connection = dataSource.getConnection()) {
-            if(connection == null) {
-                logger.error("Failed to connect to database!");
+        logger.info("Starting API key validation process");
+
+        String databaseUrl = System.getenv(Constants.DATABASE_URL);
+        if (databaseUrl == null || databaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL environment variable not set");
+        }
+
+        try (Connection connection = postgres.connect(databaseUrl, logger)) {
+            List<String> apiKeys = getApiKeys(connection);
+
+            if (apiKeys.isEmpty()) {
+                logger.warn("No API keys found to validate");
                 return;
             }
 
-            List<String> apiKeys = new ValidateApiKeys().getApiKeys(connection);
-            for(String apiKey : apiKeys) {
-                validateApiKey(apiKey, connection);
+            logger.info("Found {} API keys to validate", apiKeys.size());
+
+            int validatedCount = 0;
+            int successfulCount = 0;
+
+            for (String apiKey : apiKeys) {
+                try {
+                    boolean isValid = validateApiKey(apiKey, connection);
+                    if (isValid) {
+                        successfulCount++;
+                    }
+                    validatedCount++;
+
+                    // Rate limiting - wait between API calls (except for the last one)
+                    if (validatedCount < apiKeys.size()) {
+                        logger.debug("Waiting {}ms before next API validation", RATE_LIMIT_DELAY_MS);
+                        Thread.sleep(RATE_LIMIT_DELAY_MS);
+                    }
+
+                } catch (InterruptedException e) {
+                    logger.warn("API key validation interrupted");
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    logger.error("Error validating API key {}: {}", maskApiKey(apiKey), e.getMessage());
+                    // Continue with other keys
+                }
             }
+
+            logger.info("API key validation completed. Validated: {}, Successful: {}",
+                    validatedCount, successfulCount);
+
+        } catch (SQLException e) {
+            logger.error("Database error during API key validation", e);
+            throw e;
         }
     }
-    public List<String> getApiKeys(Connection connection) throws SQLException {
+
+    private static List<String> getApiKeys(Connection connection) throws SQLException {
         List<String> values = new ArrayList<>();
 
         if (!isValidIdentifier(Constants.TABLE_NAME_API_KEYS) || !isValidIdentifier(Constants.COLUMN_NAME_API_KEY)) {
             throw new IllegalArgumentException("Invalid table or column name");
         }
 
+        // Get ALL API keys, including inactive ones - we want to validate everything
         String sql = "SELECT " + Constants.COLUMN_NAME_API_KEY + " FROM " + Constants.TABLE_NAME_API_KEYS;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
+
             while (rs.next()) {
-                values.add(rs.getString(Constants.COLUMN_NAME_API_KEY));
+                String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
+                if (apiKey != null && !apiKey.trim().isEmpty()) {
+                    values.add(apiKey.trim());
+                }
             }
         }
 
         return values;
     }
 
-    private static void validateApiKey(String apiKey, Connection connection) throws IOException {
+    private static boolean validateApiKey(String apiKey, Connection connection) throws IOException, SQLException {
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            logger.warn("Skipping empty or null API key");
+            return false;
+        }
+
+        String maskedKey = maskApiKey(apiKey);
+        logger.debug("Validating API key: {}", maskedKey);
+
         Request request = new Request.Builder()
                 .url(Constants.API_URL_VALIDATE_KEY)
                 .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
@@ -74,26 +124,42 @@ public class ValidateApiKeys {
                 .build();
 
         try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                logger.warn("API key validation failed for key: {} (Response code: {})", apiKey, response.code());
-                updateApiKeyStatus(apiKey, false, connection);
+            boolean isValid = response.isSuccessful();
+
+            if (!isValid) {
+                logger.warn("API key validation failed for key: {} (Response code: {})",
+                        maskedKey, response.code());
+
+                // Log specific error for debugging
+                if (response.code() == 401) {
+                    logger.debug("API key {} is unauthorized (invalid)", maskedKey);
+                } else if (response.code() == 429) {
+                    logger.warn("Rate limited by Torn API for key {}", maskedKey);
+                } else {
+                    logger.warn("Unexpected response code {} for key {}", response.code(), maskedKey);
+                }
             } else {
-                logger.info("API key validation successful for key: {}", apiKey);
-                updateApiKeyStatus(apiKey, true, connection);
+                logger.info("API key validation successful for key: {}", maskedKey);
             }
-        } catch (SQLException e) {
-            logger.error("Database error while updating API key status for key: {}", apiKey, e);
+
+            updateApiKeyStatus(apiKey, isValid, connection);
+            return isValid;
+
+        } catch (Exception e) {
+            logger.error("Exception during API validation for key {}: {}", maskedKey, e.getMessage());
+            // Don't update status on exception - might be temporary network issue
+            throw e;
         }
     }
 
     private static void updateApiKeyStatus(String apiKey, boolean active, Connection connection) throws SQLException {
         // Validate column name for security
-        if (!new ValidateApiKeys().isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
+        if (!isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
             throw new IllegalArgumentException("Invalid active column name");
         }
 
         String sql = "UPDATE " + Constants.TABLE_NAME_API_KEYS +
-                " SET " + Constants.COLUMN_NAME_ACTIVE + " = ? " +
+                " SET " + Constants.COLUMN_NAME_ACTIVE + " = ?, updated_at = CURRENT_TIMESTAMP " +
                 " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -102,14 +168,24 @@ public class ValidateApiKeys {
 
             int rowsAffected = pstmt.executeUpdate();
             if (rowsAffected > 0) {
-                logger.info("Updated API key status to {} for key: {}", active, apiKey);
+                logger.debug("Updated API key status to {} for key: {}", active, maskApiKey(apiKey));
             } else {
-                logger.warn("No rows updated for API key: {}", apiKey);
+                logger.warn("No rows updated for API key: {}", maskApiKey(apiKey));
             }
         }
     }
 
-    private boolean isValidIdentifier(String identifier) {
+    private static boolean isValidIdentifier(String identifier) {
         return identifier != null && identifier.matches("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    }
+
+    /**
+     * Masks API key for secure logging - shows first 4 characters and last 4 characters
+     */
+    private static String maskApiKey(String apiKey) {
+        if (apiKey == null || apiKey.length() < 8) {
+            return "****";
+        }
+        return apiKey.substring(0, 4) + "****" + apiKey.substring(apiKey.length() - 4);
     }
 }

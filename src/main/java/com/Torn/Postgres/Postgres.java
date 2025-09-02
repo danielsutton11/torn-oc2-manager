@@ -1,41 +1,130 @@
 package com.Torn.Postgres;
 
 import com.Torn.Helpers.Constants;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Postgres {
-    
-    public Connection connect(String databaseUrl, Logger logger) throws SQLException {
-        
-        String jdbcUrl = databaseUrl;
-        String user = null;
-        String password = null;
 
+    // Cache data sources to avoid recreating them
+    private static final ConcurrentHashMap<String, HikariDataSource> dataSources = new ConcurrentHashMap<>();
+
+    /**
+     * Get a connection using HikariCP connection pooling
+     */
+    public Connection connect(String databaseUrl, Logger logger) throws SQLException {
+        HikariDataSource dataSource = getOrCreateDataSource(databaseUrl, logger);
+        return dataSource.getConnection();
+    }
+
+    /**
+     * Get or create a HikariCP DataSource for the given database URL
+     */
+    private static HikariDataSource getOrCreateDataSource(String databaseUrl, Logger logger) {
+        return dataSources.computeIfAbsent(databaseUrl, url -> createDataSource(url, logger));
+    }
+
+    /**
+     * Create a new HikariCP DataSource
+     */
+    private static HikariDataSource createDataSource(String databaseUrl, Logger logger) {
+        if (databaseUrl == null || databaseUrl.isEmpty()) {
+            throw new IllegalArgumentException("Database URL cannot be null or empty");
+        }
+
+        String jdbcUrl = convertToJdbcUrl(databaseUrl);
+        logger.info("Creating database connection pool for: {}", maskDatabaseUrl(jdbcUrl));
+
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(jdbcUrl);
+        config.setDriverClassName("org.postgresql.Driver");
+
+        // Connection pool settings optimized for Railway
+        config.setMaximumPoolSize(5);
+        config.setMinimumIdle(1);
+        config.setConnectionTimeout(30000); // 30 seconds
+        config.setIdleTimeout(300000); // 5 minutes
+        config.setMaxLifetime(1800000); // 30 minutes
+        config.setLeakDetectionThreshold(60000); // 1 minute
+
+        // PostgreSQL optimizations
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        config.addDataSourceProperty("useServerPrepStmts", "true");
+
+        return new HikariDataSource(config);
+    }
+
+    /**
+     * Convert various PostgreSQL URL formats to JDBC URL format
+     */
+    private static String convertToJdbcUrl(String databaseUrl) {
+        // Already in JDBC format
+        if (databaseUrl.startsWith("jdbc:postgresql://")) {
+            return databaseUrl;
+        }
+
+        // Convert postgresql:// to jdbc:postgresql://
+        if (databaseUrl.startsWith("postgresql://")) {
+            return databaseUrl.replace("postgresql://", "jdbc:postgresql://");
+        }
+
+        // Handle the old parsing logic for backwards compatibility
         if (databaseUrl.startsWith(Constants.POSTGRES_URL)) {
             String cleaned = databaseUrl.substring(Constants.POSTGRES_URL.length());
-            String[] parts = cleaned.split("@");
-            String[] userInfo = parts[0].split(":");
-            user = userInfo[0];
-            password = userInfo[1];
+            String[] parts = cleaned.split("@", 2); // Limit to 2 parts in case @ appears in password
 
-            jdbcUrl = Constants.POSTGRES_JDBC_URL + parts[1];
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Invalid PostgreSQL URL format");
+            }
+
+            String[] userInfo = parts[0].split(":", 2); // Limit to 2 parts in case : appears in password
+            if (userInfo.length != 2) {
+                throw new IllegalArgumentException("Invalid PostgreSQL URL - missing user:password");
+            }
+
+            String user = userInfo[0];
+            String password = userInfo[1];
+            String hostAndDb = parts[1];
+
+            return String.format("jdbc:postgresql://%s?user=%s&password=%s", hostAndDb, user, password);
         }
 
-        logger.info("Attempting to connect to database...");
+        throw new IllegalArgumentException("Unsupported database URL format: " + maskDatabaseUrl(databaseUrl));
+    }
 
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password)) {
-            logger.info("Database connection successful");
-            return conn;
+    /**
+     * Mask database URL for secure logging
+     */
+    private static String maskDatabaseUrl(String url) {
+        if (url == null) return "null";
+        // Replace password in URL with ****
+        return url.replaceAll("://([^:/@]+):([^@/:]+)@", "://$1:****@")
+                .replaceAll("password=([^&]+)", "password=****");
+    }
 
-        } catch (SQLException e) {
-            logger.error("Database connection failed. URL format: {}",
-                    jdbcUrl.replaceAll(":[^:/@]+@", ":***@"));
-            throw e;
+    /**
+     * Get direct access to DataSource for advanced use cases
+     */
+    public HikariDataSource getDataSource(String databaseUrl, Logger logger) {
+        return getOrCreateDataSource(databaseUrl, logger);
+    }
+
+    /**
+     * Clean up all data sources (call this on application shutdown)
+     */
+    public static void cleanup() {
+        for (HikariDataSource dataSource : dataSources.values()) {
+            if (!dataSource.isClosed()) {
+                dataSource.close();
+            }
         }
-        
+        dataSources.clear();
     }
 }

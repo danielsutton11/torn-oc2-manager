@@ -19,12 +19,20 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class GetFactionMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetFactionMembers.class);
-    private static final OkHttpClient client = new OkHttpClient();
+
+    private static final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build();
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final int TORN_API_RATE_LIMIT_MS = 2000; // 2 seconds between Torn API calls
 
     public static class FactionInfo {
         private final String factionId;
@@ -76,16 +84,25 @@ public class GetFactionMembers {
     public static void fetchAndProcessAllFactionMembers(Connection connection) throws SQLException, IOException {
         logger.info("Starting to fetch faction members for all factions");
 
+        // Step 1: Get Discord members
         List<GetDiscordMembers.DiscordMember> discordMembers = GetDiscordMembers.fetchDiscordMembers();
         Map<String, GetDiscordMembers.DiscordMember> discordMemberMap = createDiscordMemberMap(discordMembers);
+        logger.info("Created Discord member map with {} members", discordMembers.size());
 
         // Step 2: Get all faction information
         List<FactionInfo> factions = getFactionInfo(connection);
+        if (factions.isEmpty()) {
+            logger.warn("No active factions found to process");
+            return;
+        }
 
-        // Step 3: Process each faction
+        // Step 3: Process each faction with rate limiting
+        int processedCount = 0;
         for (FactionInfo factionInfo : factions) {
             try {
-                logger.info("Processing faction: {}", factionInfo.getFactionId());
+                logger.info("Processing faction: {} ({}/{})",
+                        factionInfo.getFactionId(), processedCount + 1, factions.size());
+
                 // Fetch faction members
                 List<FactionMember> factionMembers = fetchFactionMembers(factionInfo);
 
@@ -98,51 +115,89 @@ public class GetFactionMembers {
                 logger.info("Successfully processed {} members for faction {}",
                         factionMembers.size(), factionInfo.getFactionId());
 
+                processedCount++;
+
+                // Rate limiting between factions (except for the last one)
+                if (processedCount < factions.size()) {
+                    logger.debug("Waiting {}ms before processing next faction", TORN_API_RATE_LIMIT_MS);
+                    Thread.sleep(TORN_API_RATE_LIMIT_MS);
+                }
+
+            } catch (InterruptedException e) {
+                logger.warn("Faction processing interrupted");
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception e) {
                 logger.error("Error processing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
+                // Continue with other factions
             }
         }
+
+        logger.info("Completed processing {} of {} factions", processedCount, factions.size());
     }
 
     private static Map<String, GetDiscordMembers.DiscordMember> createDiscordMemberMap(List<GetDiscordMembers.DiscordMember> discordMembers) {
         Map<String, GetDiscordMembers.DiscordMember> map = new HashMap<>();
         for (GetDiscordMembers.DiscordMember member : discordMembers) {
-            map.put(member.getUsername().toLowerCase(), member);
+            // Use lowercase for case-insensitive matching
+            map.put(member.getUsername().toLowerCase().trim(), member);
         }
+        logger.debug("Created Discord member lookup map with {} entries", map.size());
         return map;
     }
 
     private static List<FactionInfo> getFactionInfo(Connection connection) throws SQLException {
         List<FactionInfo> factions = new ArrayList<>();
 
-        String sql = "SELECT f.id as faction_id, f.db_prefix, ak.value as api_key " +
-                "FROM factions f " +
-                "JOIN api_keys ak ON f.id = ak.faction_id " +
-                "WHERE ak.active = true " +
-                "ORDER BY f.id";
+        String sql = "SELECT f." + Constants.COLUMN_NAME_FACTION_ID + ", f." + Constants.COLUMN_NAME_DB_PREFIX +
+                ", ak." + Constants.COLUMN_NAME_API_KEY + " " +
+                "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
+                "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
+                "WHERE ak." + Constants.COLUMN_NAME_ACTIVE + " = true " +
+                "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
-            while (rs.next()) {
+            while (rs.next()) { // REMOVED break statement - process ALL factions
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbPrefix = rs.getString(Constants.COLUMN_NAME_DB_PREFIX);
                 String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
 
+                // Validate data
+                if (factionId == null || dbPrefix == null || apiKey == null) {
+                    logger.warn("Skipping faction with null data: factionId={}, dbPrefix={}, apiKey={}",
+                            factionId, dbPrefix, (apiKey == null ? "null" : "***"));
+                    continue;
+                }
+
+                // Validate dbPrefix for SQL injection prevention
+                if (!isValidDbPrefix(dbPrefix)) {
+                    logger.error("Invalid db_prefix for faction {}: {}", factionId, dbPrefix);
+                    continue;
+                }
+
                 factions.add(new FactionInfo(factionId, dbPrefix, apiKey));
-                break;
             }
         }
 
-        logger.info("Found {} factions to process", factions.size());
+        logger.info("Found {} active factions to process", factions.size());
         return factions;
+    }
+
+    private static boolean isValidDbPrefix(String dbPrefix) {
+        // Allow only alphanumeric characters and underscores, no spaces or special chars
+        return dbPrefix != null && dbPrefix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") && dbPrefix.length() <= 50;
     }
 
     private static List<FactionMember> fetchFactionMembers(FactionInfo factionInfo) throws IOException {
         List<FactionMember> members = new ArrayList<>();
 
-        String url = Constants.API_URL_TORN_BASE_URL + "/faction/" + factionInfo.getFactionId() +
-                Constants.API_URL_FACTION_MEMBERS + factionInfo.getApiKey();
+        // Construct proper Torn API URL
+        String url = Constants.API_URL_TORN_BASE_URL + "faction/" + factionInfo.getFactionId() +
+                "/members?key=" + factionInfo.getApiKey();
+
+        logger.debug("Fetching faction members from: {}", url.replaceAll("key=[^&]+", "key=***"));
 
         Request request = new Request.Builder()
                 .url(url)
@@ -153,30 +208,51 @@ public class GetFactionMembers {
             if (!response.isSuccessful()) {
                 logger.error("Failed to fetch faction members for faction {}: HTTP {}",
                         factionInfo.getFactionId(), response.code());
+
+                if (response.code() == 401) {
+                    logger.error("API key may be invalid for faction {}", factionInfo.getFactionId());
+                } else if (response.code() == 429) {
+                    logger.warn("Rate limited by Torn API for faction {}", factionInfo.getFactionId());
+                }
+
                 throw new IOException("API request failed: " + response.code());
             }
 
-            assert response.body() != null;
+            if (response.body() == null) {
+                throw new IOException("Torn API response body is null");
+            }
+
             String responseBody = response.body().string();
             JsonNode jsonResponse = objectMapper.readTree(responseBody);
 
             // Check for API error
             if (jsonResponse.has("error")) {
-                logger.error("API Error for faction {}: {}",
-                        factionInfo.getFactionId(), jsonResponse.get("error").asText());
-                throw new IOException("API Error: " + jsonResponse.get("error").asText());
+                String errorMsg = jsonResponse.get("error").asText();
+                logger.error("Torn API Error for faction {}: {}", factionInfo.getFactionId(), errorMsg);
+                throw new IOException("Torn API Error: " + errorMsg);
             }
 
-            // Parse members
-            JsonNode membersNode = jsonResponse.get(Constants.MEMBERS);
-            if (membersNode != null) {
+            // Parse members - Torn API returns members as an object with user IDs as keys
+            JsonNode membersNode = jsonResponse.get("members");
+            if (membersNode != null && membersNode.isObject()) {
                 membersNode.fields().forEachRemaining(entry -> {
-                    JsonNode memberData = entry.getValue();
-                    String userId = entry.getKey();
-                    String username = memberData.get("name").asText();
+                    try {
+                        JsonNode memberData = entry.getValue();
+                        String userId = entry.getKey();
 
-                    members.add(new FactionMember(userId, username));
+                        JsonNode nameNode = memberData.get("name");
+                        if (nameNode != null) {
+                            String username = nameNode.asText();
+                            members.add(new FactionMember(userId, username));
+                        } else {
+                            logger.warn("Missing name for user {} in faction {}", userId, factionInfo.getFactionId());
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Error parsing member data for faction {}: {}", factionInfo.getFactionId(), e.getMessage());
+                    }
                 });
+            } else {
+                logger.warn("No members found in API response for faction {}", factionInfo.getFactionId());
             }
         }
 
@@ -186,32 +262,50 @@ public class GetFactionMembers {
 
     private static void joinWithDiscordData(List<FactionMember> factionMembers,
                                             Map<String, GetDiscordMembers.DiscordMember> discordMemberMap) {
+        int matchedCount = 0;
         for (FactionMember member : factionMembers) {
-            GetDiscordMembers.DiscordMember discordMember = discordMemberMap.get(member.getUsername().toLowerCase());
+            String lookupKey = member.getUsername().toLowerCase().trim();
+            GetDiscordMembers.DiscordMember discordMember = discordMemberMap.get(lookupKey);
+
             if (discordMember != null) {
                 member.setUserInDiscord(true);
                 member.setUserDiscordId(discordMember.getDiscordId());
-                logger.debug("Matched faction member {} with Discord user {}",
+                matchedCount++;
+                logger.debug("Matched faction member '{}' with Discord user {}",
                         member.getUsername(), discordMember.getDiscordId());
             }
         }
+
+        logger.info("Matched {} of {} faction members with Discord users", matchedCount, factionMembers.size());
     }
 
     private static void writeFactionMembersToDatabase(Connection connection, FactionInfo factionInfo,
                                                       List<FactionMember> members) throws SQLException {
-        String tableName = factionInfo.getDbPrefix() + "_faction_members";
+        String tableName = factionInfo.getDbPrefix() + Constants.FACTION_MEMBERS_TABLE_SUFFIX;
+
+        logger.debug("Writing {} members to table: {}", members.size(), tableName);
 
         // Create table if it doesn't exist
         createTableIfNotExists(connection, tableName);
 
-        // Clear existing data
-        clearExistingData(connection, tableName);
-
-        // Insert new data
-        insertFactionMembers(connection, tableName, members);
+        // Clear existing data and insert new data in a transaction
+        connection.setAutoCommit(false);
+        try {
+            clearExistingData(connection, tableName);
+            insertFactionMembers(connection, tableName, members);
+            connection.commit();
+            logger.info("Successfully updated table {} with {} members", tableName, members.size());
+        } catch (SQLException e) {
+            connection.rollback();
+            logger.error("Failed to update table {}, rolling back", tableName, e);
+            throw e;
+        } finally {
+            connection.setAutoCommit(true);
+        }
     }
 
     private static void createTableIfNotExists(Connection connection, String tableName) throws SQLException {
+        // Use parameterized table name safely (already validated)
         String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
                 "user_id VARCHAR(20) PRIMARY KEY, " +
                 "username VARCHAR(100) NOT NULL, " +
@@ -238,8 +332,13 @@ public class GetFactionMembers {
 
     private static void insertFactionMembers(Connection connection, String tableName,
                                              List<FactionMember> members) throws SQLException {
-        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id) " +
-                "VALUES (?, ?, ?, ?)";
+        if (members.isEmpty()) {
+            logger.info("No members to insert into {}", tableName);
+            return;
+        }
+
+        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id, updated_at) " +
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             for (FactionMember member : members) {
