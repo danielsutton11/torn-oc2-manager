@@ -32,7 +32,7 @@ public class GetFactionMembers {
             .build();
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final int TORN_API_RATE_LIMIT_MS = 2000; // 2 seconds between Torn API calls
+    private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
     public static class FactionInfo {
         private final String factionId;
@@ -85,7 +85,8 @@ public class GetFactionMembers {
         logger.info("Starting to fetch faction members for all factions");
 
         // Step 1: Get Discord members
-        List<GetDiscordMembers.DiscordMember> discordMembers = GetDiscordMembers.fetchDiscordMembers();
+        List<GetDiscordMembers.DiscordMember> discordMembers = GetDiscordMembers.fetchDiscordMembers().join();
+        assert discordMembers != null;
         Map<String, GetDiscordMembers.DiscordMember> discordMemberMap = createDiscordMemberMap(discordMembers);
         logger.info("Created Discord member map with {} members", discordMembers.size());
 
@@ -149,17 +150,19 @@ public class GetFactionMembers {
     private static List<FactionInfo> getFactionInfo(Connection connection) throws SQLException {
         List<FactionInfo> factions = new ArrayList<>();
 
-        String sql = "SELECT f." + Constants.COLUMN_NAME_FACTION_ID + ", f." + Constants.COLUMN_NAME_DB_PREFIX +
-                ", ak." + Constants.COLUMN_NAME_API_KEY + " " +
+        String sql = "SELECT DISTINCT ON (f." + Constants.COLUMN_NAME_FACTION_ID + ") " +
+                "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
+                "f." + Constants.COLUMN_NAME_DB_PREFIX + ", " +
+                "ak." + Constants.COLUMN_NAME_API_KEY + " " +
                 "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
                 "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
                 "WHERE ak." + Constants.COLUMN_NAME_ACTIVE + " = true " +
-                "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID;
+                "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID + ", ak." + Constants.COLUMN_NAME_API_KEY;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
-            while (rs.next()) { // REMOVED break statement - process ALL factions
+            while (rs.next()) {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbPrefix = rs.getString(Constants.COLUMN_NAME_DB_PREFIX);
                 String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
@@ -184,6 +187,7 @@ public class GetFactionMembers {
         logger.info("Found {} active factions to process", factions.size());
         return factions;
     }
+
 
     private static boolean isValidDbPrefix(String dbPrefix) {
         // Allow only alphanumeric characters and underscores, no spaces or special chars

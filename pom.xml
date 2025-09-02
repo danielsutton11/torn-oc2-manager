@@ -24,6 +24,12 @@
             <version>42.7.1</version>
         </dependency>
 
+        <dependency>
+            <groupId>net.dv8tion</groupId>
+            <artifactId>JDA</artifactId>
+            <version>5.0.0-beta.20</version>
+        </dependency>
+
         <!-- Quartz Scheduler for cron functionality -->
         <dependency>
             <groupId>org.quartz-scheduler</groupId>

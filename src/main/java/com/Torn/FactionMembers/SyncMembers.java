@@ -16,39 +16,33 @@ public class SyncMembers {
     private static final Logger logger = LoggerFactory.getLogger(SyncMembers.class);
 
     public static void syncFactionMembers() throws SQLException, IOException {
-        logger.info("Starting faction members and Discord sync process");
 
-        // Environment variable checks
-        logger.info("Checking environment variables...");
-        logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv("DISCORD_BOT_TOKEN") != null);
-        logger.info("DISCORD_GUILD_ID present: {}", System.getenv("DISCORD_GUILD_ID") != null);
-        logger.info("DATABASE_URL present: {}", System.getenv("DATABASE_URL") != null);
+        GetFactionMembers.fetchAndProcessAllFactionMembers(null);
 
-        String databaseUrl = System.getenv(Constants.DATABASE_URL);
-        if (databaseUrl == null || databaseUrl.isEmpty()) {
-            throw new IllegalStateException("DATABASE_URL environment variable not set");
-        }
 
-        logger.info("Creating database connection...");
-        try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
-            logger.info("Database connection established successfully");
-
-            // Test the database connection
-            logger.info("Testing database with simple query...");
-            try (PreparedStatement pstmt = connection.prepareStatement("SELECT 1")) {
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    logger.info("Database test query successful");
-                }
-            }
-
-            logger.info("About to call GetFactionMembers...");
-            GetFactionMembers.fetchAndProcessAllFactionMembers(connection);
-            logger.info("GetFactionMembers completed successfully");
-
-        } catch (Exception e) {
-            logger.error("Error in syncFactionMembers", e);
-            throw e;
-        }
+//        logger.info("Starting faction members and Discord sync process");
+//
+//        // Environment variable checks
+//        logger.info("Checking environment variables...");
+//        logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv("DISCORD_BOT_TOKEN") != null);
+//        logger.info("DISCORD_GUILD_ID present: {}", System.getenv("DISCORD_GUILD_ID") != null);
+//        logger.info("DATABASE_URL present: {}", System.getenv("DATABASE_URL") != null);
+//
+//        String databaseUrl = System.getenv(Constants.DATABASE_URL);
+//        if (databaseUrl == null || databaseUrl.isEmpty()) {
+//            throw new IllegalStateException("DATABASE_URL environment variable not set");
+//        }
+//
+//        logger.info("Creating database connection...");
+//        try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
+//            logger.info("Database connection established successfully");
+//            logger.info("About to call GetFactionMembers...");
+//            GetFactionMembers.fetchAndProcessAllFactionMembers(connection);
+//            logger.info("GetFactionMembers completed successfully");
+//
+//        } catch (Exception e) {
+//            logger.error("Error in syncFactionMembers", e);
+//            throw e;
+//        }
     }
 }

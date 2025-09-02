@@ -41,15 +41,6 @@ public class ValidateApiKeys {
         try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
             logger.info("Database connection established successfully");
 
-            // Test connection first
-            logger.info("Testing database connection...");
-            try (PreparedStatement testStmt = connection.prepareStatement("SELECT 1")) {
-                ResultSet testRs = testStmt.executeQuery();
-                if (testRs.next()) {
-                    logger.info("Database connection test successful");
-                }
-            }
-
             List<String> apiKeys = getApiKeys(connection);
 
             if (apiKeys.isEmpty()) {
@@ -82,7 +73,6 @@ public class ValidateApiKeys {
                     break;
                 } catch (Exception e) {
                     logger.error("Error validating API key {}: {}", maskApiKey(apiKey), e.getMessage());
-                    // Continue with other keys
                 }
             }
 
@@ -95,7 +85,6 @@ public class ValidateApiKeys {
         }
     }
 
-    // Rest of your methods stay the same...
     private static List<String> getApiKeys(Connection connection) throws SQLException {
         List<String> values = new ArrayList<>();
 
