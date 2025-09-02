@@ -64,8 +64,8 @@ public class ValidateApiKeys {
     private static void validateApiKey(String apiKey, Connection connection) throws IOException {
         Request request = new Request.Builder()
                 .url(Constants.API_URL_VALIDATE_KEY)
-                .addHeader(Constants.ACCEPT_HEADER, Constants.ACCEPT_HEADER_VALUE)
-                .addHeader(Constants.AUTHORIZATION_HEADER, Constants.AUTHORIZATION_HEADER_VALUE + apiKey)
+                .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
+                .addHeader(Constants.HEADER_AUTHORIZATION, Constants.HEADER_TORN_AUTHORIZATION_VALUE + apiKey)
                 .build();
 
         try (Response response = client.newCall(request).execute()) {

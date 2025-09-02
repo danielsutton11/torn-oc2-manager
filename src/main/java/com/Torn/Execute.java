@@ -1,6 +1,5 @@
 package com.Torn;
 
-import com.Torn.ApiKeys.ValidateApiKeys;
 import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
 import com.Torn.Helpers.HttpTriggerServer;
@@ -11,6 +10,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.SQLException;
+
+import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
+import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 
 public class Execute {
 
@@ -30,14 +32,16 @@ public class Execute {
         }
 
         String jobCode = getJobCode();
-        if(jobCode == null){logger.error("Execute_Job environment variable not set.");}
-        else{
+        if (jobCode == null) {
+            logger.error("Execute_Job environment variable not set.");
+        } else {
 
-            switch(jobCode){
+            switch (jobCode) {
                 case Constants.JOB_VALIDATE_API_KEYS:
-                    ValidateApiKeys.Validate();
+                    Validate();
                     return;
                 case Constants.JOB_GET_FACTION_MEMBERS:
+                    syncFactionMembers();
                     return;
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     return;
@@ -48,82 +52,6 @@ public class Execute {
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES:
                     return;
             }
-
-
-
-
-
-        }
-
-
-        if (System.getenv(Constants.TORN_LIMITED_API_KEY) == null || System.getenv(Constants.TORN_LIMITED_API_KEY).isEmpty()) {
-            logger.error("TORN_API_KEY environment variable not set");
-            System.exit(1);
-        }
-
-        // Check for immediate run request
-        if (args.length > 0 && "run-now".equals(args[0])) {
-            logger.info("Running immediate data fetch...");
-            GetAvailableCrimes.CrimesPollingJob job = new GetAvailableCrimes.CrimesPollingJob();
-            try {
-                job.execute(null);
-                logger.info("Immediate fetch completed successfully");
-                System.exit(0);
-            } catch (JobExecutionException e) {
-                logger.error("Immediate fetch failed", e);
-                System.exit(1);
-            }
-        }
-
-        try {
-            // Create shared polling job instance
-            GetAvailableCrimes.CrimesPollingJob pollingJobInstance = new GetAvailableCrimes.CrimesPollingJob();
-
-            // Start HTTP server for manual triggers
-            HttpTriggerServer httpServer = new HttpTriggerServer(pollingJobInstance);
-            httpServer.start();
-
-            // Create Quartz scheduler
-            Scheduler scheduler = StdSchedulerFactory.getDefaultScheduler();
-            scheduler.start();
-
-            // Define job
-            JobDetail job = JobBuilder.newJob(GetAvailableCrimes.CrimesPollingJob.class)
-                    .withIdentity("crimesPollingJob", "torn")
-                    .build();
-
-            // Define trigger with configurable interval
-            Trigger trigger = TriggerBuilder.newTrigger()
-                    .withIdentity("crimesTrigger", "torn")
-                    .startNow()
-                    .withSchedule(SimpleScheduleBuilder.simpleSchedule()
-                            .withIntervalInMinutes(POLLING_INTERVAL_MINUTES)
-                            .repeatForever())
-                    .build();
-
-            // Schedule the job
-            scheduler.scheduleJob(job, trigger);
-            logger.info("Torn crimes polling job scheduled successfully. Polling every {} minutes.", POLLING_INTERVAL_MINUTES);
-
-            // Shutdown hook to clean up resources
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                logger.info("Shutting down application...");
-                try {
-                    scheduler.shutdown();
-                    httpServer.stop();
-                } catch (Exception e) {
-                    logger.error("Error during shutdown", e);
-                }
-            }));
-
-            // Keep the application running
-            while (true) {
-                Thread.sleep(60000);
-            }
-
-        } catch (Exception e) {
-            logger.error("Error starting crimes polling job", e);
-            System.exit(1);
         }
     }
 
@@ -135,4 +63,78 @@ public class Execute {
             return null;
         }
     }
+
+
+//        if (System.getenv(Constants.TORN_LIMITED_API_KEY) == null || System.getenv(Constants.TORN_LIMITED_API_KEY).isEmpty()) {
+//            logger.error("TORN_API_KEY environment variable not set");
+//            System.exit(1);
+//        }
+//
+//        // Check for immediate run request
+//        if (args.length > 0 && "run-now".equals(args[0])) {
+//            logger.info("Running immediate data fetch...");
+//            GetAvailableCrimes.CrimesPollingJob job = new GetAvailableCrimes.CrimesPollingJob();
+//            try {
+//                job.execute(null);
+//                logger.info("Immediate fetch completed successfully");
+//                System.exit(0);
+//            } catch (JobExecutionException e) {
+//                logger.error("Immediate fetch failed", e);
+//                System.exit(1);
+//            }
+//        }
+//
+//        try {
+//            // Create shared polling job instance
+//            GetAvailableCrimes.CrimesPollingJob pollingJobInstance = new GetAvailableCrimes.CrimesPollingJob();
+//
+//            // Start HTTP server for manual triggers
+//            HttpTriggerServer httpServer = new HttpTriggerServer(pollingJobInstance);
+//            httpServer.start();
+//
+//            // Create Quartz scheduler
+//            Scheduler scheduler = StdSchedulerFactory.getDefaultScheduler();
+//            scheduler.start();
+//
+//            // Define job
+//            JobDetail job = JobBuilder.newJob(GetAvailableCrimes.CrimesPollingJob.class)
+//                    .withIdentity("crimesPollingJob", "torn")
+//                    .build();
+//
+//            // Define trigger with configurable interval
+//            Trigger trigger = TriggerBuilder.newTrigger()
+//                    .withIdentity("crimesTrigger", "torn")
+//                    .startNow()
+//                    .withSchedule(SimpleScheduleBuilder.simpleSchedule()
+//                            .withIntervalInMinutes(POLLING_INTERVAL_MINUTES)
+//                            .repeatForever())
+//                    .build();
+//
+//            // Schedule the job
+//            scheduler.scheduleJob(job, trigger);
+//            logger.info("Torn crimes polling job scheduled successfully. Polling every {} minutes.", POLLING_INTERVAL_MINUTES);
+//
+//            // Shutdown hook to clean up resources
+//            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+//                logger.info("Shutting down application...");
+//                try {
+//                    scheduler.shutdown();
+//                    httpServer.stop();
+//                } catch (Exception e) {
+//                    logger.error("Error during shutdown", e);
+//                }
+//            }));
+//
+//            // Keep the application running
+//            while (true) {
+//                Thread.sleep(60000);
+//            }
+//
+//        } catch (Exception e) {
+//            logger.error("Error starting crimes polling job", e);
+//            System.exit(1);
+//        }
+//    }
+
+
 }

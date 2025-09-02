@@ -4,13 +4,11 @@ import com.Torn.FactionCrimes.Models.CrimesModel.Crime;
 import com.Torn.FactionCrimes.Models.CrimesModel.CrimesResponse;
 import com.Torn.FactionCrimes.Models.CrimesModel.Slot;
 import com.Torn.Helpers.Constants;
-import com.Torn.Helpers.HttpTriggerServer;
 import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
 import com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.quartz.*;
-import org.quartz.impl.StdSchedulerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,8 +75,8 @@ public class GetAvailableCrimes {
         private CrimesResponse fetchCrimesFromAPI() throws IOException {
             Request request = new Request.Builder()
                     .url(Constants.API_URL_AVAILABLE_FACTION_CRIMES)
-                    .addHeader(Constants.ACCEPT_HEADER, Constants.ACCEPT_HEADER_VALUE)
-                    .addHeader(Constants.AUTHORIZATION_HEADER, Constants.AUTHORIZATION_HEADER_VALUE + System.getenv(Constants.TORN_LIMITED_API_KEY))
+                    .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
+                    .addHeader(Constants.HEADER_AUTHORIZATION, Constants.HEADER_TORN_AUTHORIZATION_VALUE + System.getenv(Constants.TORN_LIMITED_API_KEY))
                     .build();
 
             try (Response response = client.newCall(request).execute()) {
@@ -274,8 +272,8 @@ public class GetAvailableCrimes {
 
             Request request = new Request.Builder()
                     .url(Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN)
-                    .addHeader(Constants.ACCEPT_HEADER, Constants.ACCEPT_HEADER_VALUE)
-                    .addHeader(Constants.AUTHORIZATION_HEADER, Constants.AUTHORIZATION_HEADER_VALUE + System.getenv(Constants.TORN_LIMITED_API_KEY))
+                    .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
+                    .addHeader(Constants.HEADER_AUTHORIZATION, Constants.HEADER_TORN_AUTHORIZATION_VALUE + System.getenv(Constants.TORN_LIMITED_API_KEY))
                     .build();
 
             try (Response response = client.newCall(request).execute()) {
