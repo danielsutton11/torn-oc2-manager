@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "java -jar target/torn-crimes-poller-1.0-SNAPSHOT.jar"
+restartPolicyType = "never"  # Important for cron jobs - don't restart on exit
+
+[environments.production]
+variables = {}

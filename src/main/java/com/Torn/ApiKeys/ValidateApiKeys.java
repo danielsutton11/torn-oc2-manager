@@ -2,6 +2,8 @@ package com.Torn.ApiKeys;
 
 import com.Torn.Helpers.Constants;
 import com.Torn.Postgres.Postgres;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -21,16 +23,19 @@ public class ValidateApiKeys {
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);
     private static final OkHttpClient client = new OkHttpClient();
 
-    public static void Validate() throws SQLException, IOException {
-        logger.info("Starting to validate API keys");
+    private static final HikariDataSource dataSource = createDataSource();
 
+    private static HikariDataSource createDataSource() {
         String databaseUrl = System.getenv(Constants.DATABASE_URL);
-        if(databaseUrl == null) {
-            logger.error("No database url found!");
-            return;
-        }
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(databaseUrl);
+        config.setMaximumPoolSize(5);
+        config.setConnectionTimeout(30000);
+        return new HikariDataSource(config);
+    }
 
-        try (Connection connection = new Postgres().connect(databaseUrl, logger)) {
+    public static void Validate() throws SQLException, IOException {
+        try (Connection connection = dataSource.getConnection()) {
             if(connection == null) {
                 logger.error("Failed to connect to database!");
                 return;
