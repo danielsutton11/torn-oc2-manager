@@ -26,9 +26,9 @@ public class Constants {
 
     public static final String TABLE_NAME_FACTIONS = "factions";
     public static final String COLUMN_NAME_FACTION_ID = "faction_id";
-    public static final String COLUMN_NAME_DB_PREFIX = "db_prefix";
+    public static final String COLUMN_NAME_DB_SUFFIX = "db_suffix";
     public static final String COLUMN_NAME_OWNER_NAME = "owner_name";
-    public static final String FACTION_MEMBERS_TABLE_PREFIX = "faction_members_";
+    public static final String FACTION_MEMBERS_TABLE_PREFIX = "members_";
 
     //TORN API ENDPOINTS
     public static final String API_URL_TORN_BASE_URL = "https://api.torn.com/v2/";

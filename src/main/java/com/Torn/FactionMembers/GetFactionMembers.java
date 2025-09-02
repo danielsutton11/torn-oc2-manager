@@ -156,7 +156,7 @@ public class GetFactionMembers {
 
         String sql = "SELECT DISTINCT ON (f." + Constants.COLUMN_NAME_FACTION_ID + ") " +
                 "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
-                "f." + Constants.COLUMN_NAME_DB_PREFIX + ", " +
+                "f." + Constants.COLUMN_NAME_DB_SUFFIX + ", " +
                 "ak." + Constants.COLUMN_NAME_API_KEY + " " +
                 "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
                 "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
@@ -168,23 +168,23 @@ public class GetFactionMembers {
 
             while (rs.next()) {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
-                String dbPrefix = rs.getString(Constants.COLUMN_NAME_DB_PREFIX);
+                String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
                 String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
 
                 // Validate data
-                if (factionId == null || dbPrefix == null || apiKey == null) {
-                    logger.warn("Skipping faction with null data: factionId={}, dbPrefix={}, apiKey={}",
-                            factionId, dbPrefix, (apiKey == null ? "null" : "***"));
+                if (factionId == null || dbSuffix == null || apiKey == null) {
+                    logger.warn("Skipping faction with null data: factionId={}, dbSuffix={}, apiKey={}",
+                            factionId, dbSuffix, (apiKey == null ? "null" : "***"));
                     continue;
                 }
 
-                // Validate dbPrefix for SQL injection prevention
-                if (!isValidDbPrefix(dbPrefix)) {
-                    logger.error("Invalid db_prefix for faction {}: {}", factionId, dbPrefix);
+                // Validate dbSuffix for SQL injection prevention
+                if (!isValidDbPrefix(dbSuffix)) {
+                    logger.error("Invalid db_suffix for faction {}: {}", factionId, dbSuffix);
                     continue;
                 }
 
-                factions.add(new FactionInfo(factionId, dbPrefix, apiKey));
+                factions.add(new FactionInfo(factionId, dbSuffix, apiKey));
             }
         }
 
