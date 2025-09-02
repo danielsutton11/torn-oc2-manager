@@ -1,7 +1,7 @@
 package com.Torn.ApiKeys;
 
 import com.Torn.Helpers.Constants;
-import com.Torn.Postgres.Postgres;
+import com.Torn.Execute;  // Import the Execute class instead
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -17,8 +17,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static com.Torn.Execute.postgres;
-
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);
@@ -29,8 +27,7 @@ public class ValidateApiKeys {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build();
 
-    private static final int RATE_LIMIT_DELAY_MS = 2000; // 2 seconds between API calls
-
+    private static final int RATE_LIMIT_DELAY_MS = 2000;
 
     public static void Validate() throws SQLException, IOException {
         logger.info("Starting API key validation process");
@@ -40,7 +37,19 @@ public class ValidateApiKeys {
             throw new IllegalStateException("DATABASE_URL environment variable not set");
         }
 
-        try (Connection connection = postgres.connect(databaseUrl, logger)) {
+        logger.info("Connecting to database...");
+        try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
+            logger.info("Database connection established successfully");
+
+            // Test connection first
+            logger.info("Testing database connection...");
+            try (PreparedStatement testStmt = connection.prepareStatement("SELECT 1")) {
+                ResultSet testRs = testStmt.executeQuery();
+                if (testRs.next()) {
+                    logger.info("Database connection test successful");
+                }
+            }
+
             List<String> apiKeys = getApiKeys(connection);
 
             if (apiKeys.isEmpty()) {
@@ -86,6 +95,7 @@ public class ValidateApiKeys {
         }
     }
 
+    // Rest of your methods stay the same...
     private static List<String> getApiKeys(Connection connection) throws SQLException {
         List<String> values = new ArrayList<>();
 
@@ -93,7 +103,6 @@ public class ValidateApiKeys {
             throw new IllegalArgumentException("Invalid table or column name");
         }
 
-        // Get ALL API keys, including inactive ones - we want to validate everything
         String sql = "SELECT " + Constants.COLUMN_NAME_API_KEY + " FROM " + Constants.TABLE_NAME_API_KEYS;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
@@ -132,7 +141,6 @@ public class ValidateApiKeys {
                 logger.warn("API key validation failed for key: {} (Response code: {})",
                         maskedKey, response.code());
 
-                // Log specific error for debugging
                 if (response.code() == 401) {
                     logger.debug("API key {} is unauthorized (invalid)", maskedKey);
                 } else if (response.code() == 429) {
@@ -149,19 +157,17 @@ public class ValidateApiKeys {
 
         } catch (Exception e) {
             logger.error("Exception during API validation for key {}: {}", maskedKey, e.getMessage());
-            // Don't update status on exception - might be temporary network issue
             throw e;
         }
     }
 
     private static void updateApiKeyStatus(String apiKey, boolean active, Connection connection) throws SQLException {
-        // Validate column name for security
         if (!isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
             throw new IllegalArgumentException("Invalid active column name");
         }
 
         String sql = "UPDATE " + Constants.TABLE_NAME_API_KEYS +
-                " SET " + Constants.COLUMN_NAME_ACTIVE + " = ?, updated_at = CURRENT_TIMESTAMP " +
+                " SET " + Constants.COLUMN_NAME_ACTIVE + " = ? " +
                 " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -181,9 +187,6 @@ public class ValidateApiKeys {
         return identifier != null && identifier.matches("^[a-zA-Z_][a-zA-Z0-9_]*$");
     }
 
-    /**
-     * Masks API key for secure logging - shows first 4 characters and last 4 characters
-     */
     private static String maskApiKey(String apiKey) {
         if (apiKey == null || apiKey.length() < 8) {
             return "****";

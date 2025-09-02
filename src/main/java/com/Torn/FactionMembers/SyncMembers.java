@@ -1,8 +1,7 @@
 package com.Torn.FactionMembers;
 
-import com.Torn.ApiKeys.ValidateApiKeys;
+import com.Torn.Execute; // Import Execute class instead of static import
 import com.Torn.Helpers.Constants;
-import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,8 +11,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
-import static com.Torn.Execute.postgres;
-
 public class SyncMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(SyncMembers.class);
@@ -21,7 +18,7 @@ public class SyncMembers {
     public static void syncFactionMembers() throws SQLException, IOException {
         logger.info("Starting faction members and Discord sync process");
 
-        // Add this debug block
+        // Environment variable checks
         logger.info("Checking environment variables...");
         logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv("DISCORD_BOT_TOKEN") != null);
         logger.info("DISCORD_GUILD_ID present: {}", System.getenv("DISCORD_GUILD_ID") != null);
@@ -33,7 +30,7 @@ public class SyncMembers {
         }
 
         logger.info("Creating database connection...");
-        try (Connection connection = postgres.connect(databaseUrl, logger)) {
+        try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
             logger.info("Database connection established successfully");
 
             // Test the database connection
