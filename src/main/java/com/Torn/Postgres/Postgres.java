@@ -6,7 +6,9 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Postgres {
@@ -20,6 +22,26 @@ public class Postgres {
     public Connection connect(String databaseUrl, Logger logger) throws SQLException {
         HikariDataSource dataSource = getOrCreateDataSource(databaseUrl, logger);
         return dataSource.getConnection();
+    }
+
+    public Connection connectSimple(String databaseUrl, Logger logger) throws SQLException {
+        String jdbcUrl = convertToJdbcUrl(databaseUrl);
+        logger.info("Creating simple database connection to: {}", maskDatabaseUrl(jdbcUrl));
+
+        // Set connection properties for faster timeouts
+        Properties props = new Properties();
+        props.setProperty("socketTimeout", "10");
+        props.setProperty("loginTimeout", "10");
+        props.setProperty("connectTimeout", "10");
+
+        try {
+            Connection conn = DriverManager.getConnection(jdbcUrl, props);
+            logger.info("Simple database connection successful");
+            return conn;
+        } catch (SQLException e) {
+            logger.error("Simple database connection failed: {}", e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -44,19 +66,25 @@ public class Postgres {
         config.setJdbcUrl(jdbcUrl);
         config.setDriverClassName("org.postgresql.Driver");
 
-        // Connection pool settings optimized for Railway
-        config.setMaximumPoolSize(5);
-        config.setMinimumIdle(1);
-        config.setConnectionTimeout(30000); // 30 seconds
-        config.setIdleTimeout(300000); // 5 minutes
-        config.setMaxLifetime(1800000); // 30 minutes
-        config.setLeakDetectionThreshold(60000); // 1 minute
+        // Much more aggressive timeouts for Railway
+        config.setMaximumPoolSize(3);           // Reduced pool size
+        config.setMinimumIdle(0);               // No minimum idle connections
+        config.setConnectionTimeout(10000);     // 10 seconds instead of 30
+        config.setValidationTimeout(5000);      // 5 seconds validation
+        config.setIdleTimeout(300000);          // 5 minutes
+        config.setMaxLifetime(600000);          // 10 minutes instead of 30
+        config.setLeakDetectionThreshold(30000); // 30 seconds instead of 60
+
+        // Test connection on startup
+        config.setInitializationFailTimeout(15000); // 15 seconds max to initialize
 
         // PostgreSQL optimizations
         config.addDataSourceProperty("cachePrepStmts", "true");
         config.addDataSourceProperty("prepStmtCacheSize", "250");
         config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
         config.addDataSourceProperty("useServerPrepStmts", "true");
+        config.addDataSourceProperty("socketTimeout", "10");      // 10 second socket timeout
+        config.addDataSourceProperty("loginTimeout", "10");       // 10 second login timeout
 
         return new HikariDataSource(config);
     }
