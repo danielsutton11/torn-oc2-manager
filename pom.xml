@@ -127,7 +127,7 @@
                             </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.Torn.FactionCrimes.Available.GetAvailableCrimes</mainClass>
+                                    <mainClass>com.Torn.Execute</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
