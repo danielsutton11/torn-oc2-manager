@@ -227,6 +227,8 @@ public class GetFactionMembers {
             }
 
             String responseBody = response.body().string();
+            logger.debug("Raw API response for faction {}: {}", factionInfo.getFactionId(), responseBody);
+
             JsonNode jsonResponse = objectMapper.readTree(responseBody);
 
             // Check for API error
@@ -236,27 +238,28 @@ public class GetFactionMembers {
                 throw new IOException("Torn API Error: " + errorMsg);
             }
 
-            // Parse members - Torn API returns members as an object with user IDs as keys
+            // Parse members - Torn API returns members as an ARRAY, not an object
             JsonNode membersNode = jsonResponse.get("members");
-            if (membersNode != null && membersNode.isObject()) {
-                membersNode.fields().forEachRemaining(entry -> {
+            if (membersNode != null && membersNode.isArray()) {
+                for (JsonNode memberNode : membersNode) {
                     try {
-                        JsonNode memberData = entry.getValue();
-                        String userId = entry.getKey();
+                        // Get ID and name from each member object
+                        JsonNode idNode = memberNode.get("id");
+                        JsonNode nameNode = memberNode.get("name");
 
-                        JsonNode nameNode = memberData.get("name");
-                        if (nameNode != null) {
+                        if (idNode != null && nameNode != null) {
+                            String userId = idNode.asText();
                             String username = nameNode.asText();
                             members.add(new FactionMember(userId, username));
                         } else {
-                            logger.warn("Missing name for user {} in faction {}", userId, factionInfo.getFactionId());
+                            logger.warn("Missing id or name in member data for faction {}", factionInfo.getFactionId());
                         }
                     } catch (Exception e) {
                         logger.warn("Error parsing member data for faction {}: {}", factionInfo.getFactionId(), e.getMessage());
                     }
-                });
+                }
             } else {
-                logger.warn("No members found in API response for faction {}", factionInfo.getFactionId());
+                logger.warn("No members array found in API response for faction {}", factionInfo.getFactionId());
             }
         }
 
