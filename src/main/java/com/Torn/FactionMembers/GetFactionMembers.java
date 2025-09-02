@@ -179,7 +179,7 @@ public class GetFactionMembers {
                 }
 
                 // Validate dbSuffix for SQL injection prevention
-                if (!isValidDbPrefix(dbSuffix)) {
+                if (!isValidDbSuffix(dbSuffix)) {
                     logger.error("Invalid db_suffix for faction {}: {}", factionId, dbSuffix);
                     continue;
                 }
@@ -193,9 +193,11 @@ public class GetFactionMembers {
     }
 
 
-    private static boolean isValidDbPrefix(String dbPrefix) {
-        // Allow only alphanumeric characters and underscores, no spaces or special chars
-        return dbPrefix != null && dbPrefix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") && dbPrefix.length() <= 50;
+    private static boolean isValidDbSuffix(String dbSuffix) {
+        return dbSuffix != null &&
+                dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
+                dbSuffix.length() >= 1 &&
+                dbSuffix.length() <= 50;
     }
 
     private static List<FactionMember> fetchFactionMembers(FactionInfo factionInfo) throws IOException {
@@ -350,15 +352,16 @@ public class GetFactionMembers {
             return;
         }
 
-        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id,user_discord_mention_id, updated_at) " +
-                "VALUES (?, ?, ?, ?,?, CURRENT_TIMESTAMP)";
+        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id, user_discord_mention_id, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             for (FactionMember member : members) {
-                pstmt.setString(1, member.getUserId());
-                pstmt.setString(2, member.getUsername());
-                pstmt.setBoolean(3, member.isUserInDiscord());
-                pstmt.setString(4, member.getUserDiscordId());
+                pstmt.setString(1, member.getUserId());                    // Parameter 1
+                pstmt.setString(2, member.getUsername());                  // Parameter 2
+                pstmt.setBoolean(3, member.isUserInDiscord());             // Parameter 3
+                pstmt.setString(4, member.getUserDiscordId());             // Parameter 4
+                pstmt.setString(5, member.getUserDiscordMentionId());      // Parameter 5 - THIS WAS MISSING!
                 pstmt.addBatch();
             }
 
