@@ -1,5 +1,6 @@
 package com.Torn.Discord.Members;
 
+import com.Torn.Helpers.Constants;
 import net.dv8tion.jda.api.*;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.requests.GatewayIntent;
@@ -55,13 +56,13 @@ public class GetDiscordMembers {
         CompletableFuture<List<DiscordMember>> future = new CompletableFuture<>();
         try {
 
-            String botToken = System.getenv("DISCORD_BOT_TOKEN");
+            String botToken = System.getenv(Constants.DISCORD_BOT_TOKEN);
             if (botToken == null || botToken.isEmpty()) {
                 logger.error("DISCORD_BOT_TOKEN not set");
                 return null;
             }
 
-            String guildId = System.getenv("DISCORD_GUILD_ID");
+            String guildId = System.getenv(Constants.DISCORD_GUILD_ID);
             if (guildId == null || guildId.isEmpty()) {
                 logger.error("DISCORD_GUILD_ID not set");
                 return null;
@@ -77,9 +78,9 @@ public class GetDiscordMembers {
 
             Guild guild = jda.getGuildById(guildId);
             if (guild == null) {
-                logger.error("Guild not found for ID: {}", guildId);
+                logger.error("Discord Server not found for ID: {}", guildId);
                 jda.shutdown();
-                future.completeExceptionally(new IllegalStateException("Guild not found"));
+                future.completeExceptionally(new IllegalStateException("Discord Server not found"));
                 return future;
             }
 

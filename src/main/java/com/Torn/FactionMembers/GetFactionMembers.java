@@ -36,18 +36,18 @@ public class GetFactionMembers {
 
     public static class FactionInfo {
         private final String factionId;
-        private final String dbPrefix;
+        private final String dbSuffix;
         private final String apiKey;
 
         public FactionInfo(String factionId, String dbPrefix, String apiKey) {
             this.factionId = factionId;
-            this.dbPrefix = dbPrefix;
+            this.dbSuffix = dbPrefix;
             this.apiKey = apiKey;
         }
 
         // Getters
         public String getFactionId() { return factionId; }
-        public String getDbPrefix() { return dbPrefix; }
+        public String getDbSuffix() { return dbSuffix; }
         public String getApiKey() { return apiKey; }
     }
 
@@ -56,6 +56,7 @@ public class GetFactionMembers {
         private final String username;
         private boolean userInDiscord = false;
         private String userDiscordId = null;
+        private String userDiscordMentionId = null;
 
         public FactionMember(String userId, String username) {
             this.userId = userId;
@@ -69,6 +70,8 @@ public class GetFactionMembers {
         public void setUserInDiscord(boolean userInDiscord) { this.userInDiscord = userInDiscord; }
         public String getUserDiscordId() { return userDiscordId; }
         public void setUserDiscordId(String userDiscordId) { this.userDiscordId = userDiscordId; }
+        public String getUserDiscordMentionId() { return userDiscordMentionId; }
+        public void setUserDiscordMentionId(String userDiscordMentionId) { this.userDiscordMentionId = userDiscordMentionId; }
 
         @Override
         public String toString() {
@@ -76,7 +79,8 @@ public class GetFactionMembers {
                     "userId='" + userId + '\'' +
                     ", username='" + username + '\'' +
                     ", userInDiscord=" + userInDiscord +
-                    ", userDiscordId='" + userDiscordId + '\'' +
+                    ", userDiscordId='" + userDiscordId +
+                    ", userDiscordMentionId='" + userDiscordMentionId +  '\'' +
                     '}';
         }
     }
@@ -198,8 +202,8 @@ public class GetFactionMembers {
         List<FactionMember> members = new ArrayList<>();
 
         // Construct proper Torn API URL
-        String url = Constants.API_URL_TORN_BASE_URL + "faction/" + factionInfo.getFactionId() +
-                "/members?key=" + factionInfo.getApiKey();
+        String url = Constants.API_URL_FACTION + factionInfo.getFactionId() +
+                Constants.API_URL_FACTION_MEMBERS + factionInfo.getApiKey();
 
         logger.debug("Fetching faction members from: {}", url.replaceAll("key=[^&]+", "key=***"));
 
@@ -239,13 +243,13 @@ public class GetFactionMembers {
             }
 
             // Parse members - Torn API returns members as an ARRAY, not an object
-            JsonNode membersNode = jsonResponse.get("members");
+            JsonNode membersNode = jsonResponse.get(Constants.MEMBERS);
             if (membersNode != null && membersNode.isArray()) {
                 for (JsonNode memberNode : membersNode) {
                     try {
                         // Get ID and name from each member object
-                        JsonNode idNode = memberNode.get("id");
-                        JsonNode nameNode = memberNode.get("name");
+                        JsonNode idNode = memberNode.get(Constants.ID);
+                        JsonNode nameNode = memberNode.get(Constants.NAME);
 
                         if (idNode != null && nameNode != null) {
                             String userId = idNode.asText();
@@ -277,6 +281,7 @@ public class GetFactionMembers {
             if (discordMember != null) {
                 member.setUserInDiscord(true);
                 member.setUserDiscordId(discordMember.getDiscordId());
+                member.setUserDiscordMentionId(discordMember.getMention());
                 matchedCount++;
                 logger.debug("Matched faction member '{}' with Discord user {}",
                         member.getUsername(), discordMember.getDiscordId());
@@ -288,7 +293,7 @@ public class GetFactionMembers {
 
     private static void writeFactionMembersToDatabase(Connection connection, FactionInfo factionInfo,
                                                       List<FactionMember> members) throws SQLException {
-        String tableName = factionInfo.getDbPrefix() + Constants.FACTION_MEMBERS_TABLE_SUFFIX;
+        String tableName = Constants.FACTION_MEMBERS_TABLE_PREFIX + factionInfo.getDbSuffix();
 
         logger.debug("Writing {} members to table: {}", members.size(), tableName);
 
@@ -318,6 +323,7 @@ public class GetFactionMembers {
                 "username VARCHAR(100) NOT NULL, " +
                 "user_in_discord BOOLEAN DEFAULT FALSE, " +
                 "user_discord_id VARCHAR(50), " +
+                "user_discord_mention_id VARCHAR(50), " +
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
                 "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                 ")";
@@ -344,8 +350,8 @@ public class GetFactionMembers {
             return;
         }
 
-        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id, updated_at) " +
-                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id,user_discord_mention_id, updated_at) " +
+                "VALUES (?, ?, ?, ?,?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             for (FactionMember member : members) {

@@ -21,13 +21,13 @@ public class SyncMembers {
 
         // Environment variable checks
         logger.info("Checking environment variables...");
-        logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv("DISCORD_BOT_TOKEN") != null);
-        logger.info("DISCORD_GUILD_ID present: {}", System.getenv("DISCORD_GUILD_ID") != null);
-        logger.info("DATABASE_URL present: {}", System.getenv("DATABASE_URL") != null);
+        logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv(Constants.DISCORD_BOT_TOKEN) != null);
+        logger.info("DISCORD_GUILD_ID present: {}", System.getenv(Constants.DISCORD_GUILD_ID) != null);
+        logger.info("DATABASE_URL_CONFIG present: {}", System.getenv(Constants.DATABASE_URL_CONFIG) != null);
 
-        String databaseUrl = System.getenv(Constants.DATABASE_URL);
+        String databaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         if (databaseUrl == null || databaseUrl.isEmpty()) {
-            throw new IllegalStateException("DATABASE_URL environment variable not set");
+            throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
         }
 
         logger.info("Creating database connection...");

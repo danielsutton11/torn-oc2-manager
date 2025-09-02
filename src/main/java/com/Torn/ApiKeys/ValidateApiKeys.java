@@ -1,7 +1,7 @@
 package com.Torn.ApiKeys;
 
 import com.Torn.Helpers.Constants;
-import com.Torn.Execute;  // Import the Execute class instead
+import com.Torn.Execute;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -29,19 +29,36 @@ public class ValidateApiKeys {
 
     private static final int RATE_LIMIT_DELAY_MS = 2000;
 
+    // New class to hold API key info including faction_id
+    public static class ApiKeyInfo {
+        private final String apiKey;
+        private final String factionId;
+        private final String ownerName;
+
+        public ApiKeyInfo(String apiKey, String factionId, String ownerName) {
+            this.apiKey = apiKey;
+            this.factionId = factionId;
+            this.ownerName = ownerName;
+        }
+
+        public String getApiKey() { return apiKey; }
+        public String getFactionId() { return factionId; }
+        public String getOwnerName() { return ownerName; }
+    }
+
     public static void Validate() throws SQLException, IOException {
         logger.info("Starting API key validation process");
 
-        String databaseUrl = System.getenv(Constants.DATABASE_URL);
+        String databaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         if (databaseUrl == null || databaseUrl.isEmpty()) {
-            throw new IllegalStateException("DATABASE_URL environment variable not set");
+            throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
         }
 
         logger.info("Connecting to database...");
         try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
             logger.info("Database connection established successfully");
 
-            List<String> apiKeys = getApiKeys(connection);
+            List<ApiKeyInfo> apiKeys = getApiKeysWithFactionInfo(connection);
 
             if (apiKeys.isEmpty()) {
                 logger.warn("No API keys found to validate");
@@ -53,9 +70,9 @@ public class ValidateApiKeys {
             int validatedCount = 0;
             int successfulCount = 0;
 
-            for (String apiKey : apiKeys) {
+            for (ApiKeyInfo apiKeyInfo : apiKeys) {
                 try {
-                    boolean isValid = validateApiKey(apiKey, connection);
+                    boolean isValid = validateApiKey(apiKeyInfo, connection);
                     if (isValid) {
                         successfulCount++;
                     }
@@ -72,7 +89,8 @@ public class ValidateApiKeys {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    logger.error("Error validating API key {}: {}", maskApiKey(apiKey), e.getMessage());
+                    logger.error("Error validating API key {} for faction {}: {}",
+                            maskApiKey(apiKeyInfo.getApiKey()), apiKeyInfo.getFactionId(), e.getMessage());
                 }
             }
 
@@ -85,37 +103,52 @@ public class ValidateApiKeys {
         }
     }
 
-    private static List<String> getApiKeys(Connection connection) throws SQLException {
-        List<String> values = new ArrayList<>();
+    // Updated method to get API keys with faction information
+    private static List<ApiKeyInfo> getApiKeysWithFactionInfo(Connection connection) throws SQLException {
+        List<ApiKeyInfo> apiKeys = new ArrayList<>();
 
-        if (!isValidIdentifier(Constants.TABLE_NAME_API_KEYS) || !isValidIdentifier(Constants.COLUMN_NAME_API_KEY)) {
+        if (!isValidIdentifier(Constants.TABLE_NAME_API_KEYS) ||
+                !isValidIdentifier(Constants.COLUMN_NAME_API_KEY) ||
+                !isValidIdentifier(Constants.COLUMN_NAME_FACTION_ID)) {
             throw new IllegalArgumentException("Invalid table or column name");
         }
 
-        String sql = "SELECT " + Constants.COLUMN_NAME_API_KEY + " FROM " + Constants.TABLE_NAME_API_KEYS;
+        String sql = "SELECT " +
+                Constants.COLUMN_NAME_API_KEY + ", " +
+                Constants.COLUMN_NAME_FACTION_ID + ", " +
+                "owner_name " +
+                "FROM " + Constants.TABLE_NAME_API_KEYS;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
             while (rs.next()) {
                 String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
-                if (apiKey != null && !apiKey.trim().isEmpty()) {
-                    values.add(apiKey.trim());
+                String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
+                String ownerName = rs.getString(Constants.COLUMN_NAME_OWNER_NAME);
+
+                if (apiKey != null && !apiKey.trim().isEmpty() &&
+                        factionId != null && !factionId.trim().isEmpty()) {
+                    apiKeys.add(new ApiKeyInfo(apiKey.trim(), factionId.trim(), ownerName));
                 }
             }
         }
 
-        return values;
+        return apiKeys;
     }
 
-    private static boolean validateApiKey(String apiKey, Connection connection) throws IOException, SQLException {
+    // Updated validateApiKey method that takes ApiKeyInfo instead of just the key
+    private static boolean validateApiKey(ApiKeyInfo apiKeyInfo, Connection connection) throws IOException, SQLException {
+        String apiKey = apiKeyInfo.getApiKey();
+        String factionId = apiKeyInfo.getFactionId();
+
         if (apiKey == null || apiKey.trim().isEmpty()) {
-            logger.warn("Skipping empty or null API key");
+            logger.warn("Skipping empty or null API key for faction {}", factionId);
             return false;
         }
 
         String maskedKey = maskApiKey(apiKey);
-        logger.debug("Validating API key: {}", maskedKey);
+        logger.debug("Validating API key: {} for faction: {}", maskedKey, factionId);
 
         Request request = new Request.Builder()
                 .url(Constants.API_URL_VALIDATE_KEY)
@@ -127,47 +160,59 @@ public class ValidateApiKeys {
             boolean isValid = response.isSuccessful();
 
             if (!isValid) {
-                logger.warn("API key validation failed for key: {} (Response code: {})",
-                        maskedKey, response.code());
+                logger.warn("API key validation failed for key: {} and faction: {} (Response code: {})",
+                        maskedKey, factionId, response.code());
 
                 if (response.code() == 401) {
-                    logger.debug("API key {} is unauthorized (invalid)", maskedKey);
+                    logger.debug("API key {} for faction {} is unauthorized (invalid)", maskedKey, factionId);
                 } else if (response.code() == 429) {
-                    logger.warn("Rate limited by Torn API for key {}", maskedKey);
+                    logger.warn("Rate limited by Torn API for key {} and faction {}", maskedKey, factionId);
                 } else {
-                    logger.warn("Unexpected response code {} for key {}", response.code(), maskedKey);
+                    logger.warn("Unexpected response code {} for key {} and faction {}",
+                            response.code(), maskedKey, factionId);
                 }
             } else {
-                logger.info("API key validation successful for key: {}", maskedKey);
+                logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
             }
 
-            updateApiKeyStatus(apiKey, isValid, connection);
+            // Now we can call updateApiKeyStatus with the faction ID
+            updateApiKeyStatus(apiKey, factionId, isValid, connection);
             return isValid;
 
         } catch (Exception e) {
-            logger.error("Exception during API validation for key {}: {}", maskedKey, e.getMessage());
+            logger.error("Exception during API validation for key {} and faction {}: {}",
+                    maskedKey, factionId, e.getMessage());
             throw e;
         }
     }
 
-    private static void updateApiKeyStatus(String apiKey, boolean active, Connection connection) throws SQLException {
+    // Updated updateApiKeyStatus method that requires faction ID
+    private static void updateApiKeyStatus(String apiKey, String factionId, boolean active, Connection connection) throws SQLException {
         if (!isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
             throw new IllegalArgumentException("Invalid active column name");
         }
 
         String sql = "UPDATE " + Constants.TABLE_NAME_API_KEYS +
                 " SET " + Constants.COLUMN_NAME_ACTIVE + " = ? " +
-                " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ?";
+                " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ? " +
+                " AND " + Constants.COLUMN_NAME_FACTION_ID + " = ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setBoolean(1, active);
             pstmt.setString(2, apiKey);
+            pstmt.setString(3, factionId);
 
             int rowsAffected = pstmt.executeUpdate();
             if (rowsAffected > 0) {
-                logger.debug("Updated API key status to {} for key: {}", active, maskApiKey(apiKey));
+                logger.debug("Updated {} API key record(s) to active={} for key: {} and faction: {}",
+                        rowsAffected, active, maskApiKey(apiKey), factionId);
             } else {
-                logger.warn("No rows updated for API key: {}", maskApiKey(apiKey));
+                logger.warn("No rows updated for API key: {} and faction: {}", maskApiKey(apiKey), factionId);
+            }
+
+            if (rowsAffected > 1) {
+                logger.warn("Updated {} rows for API key {} and faction {} - this suggests duplicate entries",
+                        rowsAffected, maskApiKey(apiKey), factionId);
             }
         }
     }
