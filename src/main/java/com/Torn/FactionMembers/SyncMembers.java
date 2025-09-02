@@ -8,50 +8,50 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+
+import static com.Torn.Execute.postgres;
 
 public class SyncMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(SyncMembers.class);
 
-    public static void syncFactionMembers() {
+    public static void syncFactionMembers() throws SQLException, IOException {
         logger.info("Starting faction members and Discord sync process");
 
-        try {
-            String databaseUrl = System.getenv(Constants.DATABASE_URL);
-            if (databaseUrl == null) {
-                logger.error("No database URL found!");
-                return;
-            }
+        // Add this debug block
+        logger.info("Checking environment variables...");
+        logger.info("DISCORD_BOT_TOKEN present: {}", System.getenv("DISCORD_BOT_TOKEN") != null);
+        logger.info("DISCORD_GUILD_ID present: {}", System.getenv("DISCORD_GUILD_ID") != null);
+        logger.info("DATABASE_URL present: {}", System.getenv("DATABASE_URL") != null);
 
-            // Validate Discord environment variables
-            String discordBotToken = System.getenv(Constants.DISCORD_BOT_TOKEN);
-            String discordGuildId = System.getenv(Constants.DISCORD_GUILD_ID);
+        String databaseUrl = System.getenv(Constants.DATABASE_URL);
+        if (databaseUrl == null || databaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL environment variable not set");
+        }
 
-            if (discordBotToken == null || discordGuildId == null) {
-                logger.error("Discord bot token or guild ID not found in environment variables!");
-                return;
-            }
+        logger.info("Creating database connection...");
+        try (Connection connection = postgres.connect(databaseUrl, logger)) {
+            logger.info("Database connection established successfully");
 
-            try (Connection connection = new Postgres().connect(databaseUrl, logger)) {
-                if (connection == null) {
-                    logger.error("Failed to connect to database!");
-                    return;
+            // Test the database connection
+            logger.info("Testing database with simple query...");
+            try (PreparedStatement pstmt = connection.prepareStatement("SELECT 1")) {
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    logger.info("Database test query successful");
                 }
-
-                // Execute the main sync process
-                GetFactionMembers.fetchAndProcessAllFactionMembers(connection);
-
-                logger.info("Faction members and Discord sync completed successfully");
-
-            } catch (SQLException e) {
-                logger.error("Database error during sync process", e);
-            } catch (IOException e) {
-                logger.error("IO error during sync process (likely API or Discord related)", e);
             }
+
+            logger.info("About to call GetFactionMembers...");
+            GetFactionMembers.fetchAndProcessAllFactionMembers(connection);
+            logger.info("GetFactionMembers completed successfully");
 
         } catch (Exception e) {
-            logger.error("Unexpected error during faction Discord sync", e);
+            logger.error("Error in syncFactionMembers", e);
+            throw e;
         }
     }
 }

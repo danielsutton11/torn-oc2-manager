@@ -63,15 +63,20 @@ public class GetDiscordMembers {
     }
 
     public static List<DiscordMember> fetchDiscordMembers() throws IOException {
-        // Validate environment variables
+
+        logger.info("Starting Discord member fetch...");
+
+        // Validate environment variables first
         String botToken = System.getenv(Constants.DISCORD_BOT_TOKEN);
         if (botToken == null || botToken.isEmpty()) {
-            throw new IllegalStateException("DISCORD_BOT_TOKEN environment variable not set");
+            logger.error("DISCORD_BOT_TOKEN not set - skipping Discord fetch");
+            return new ArrayList<>(); // Return empty list instead of failing
         }
 
         String guildId = System.getenv(Constants.DISCORD_GUILD_ID);
         if (guildId == null || guildId.isEmpty()) {
-            throw new IllegalStateException("DISCORD_GUILD_ID environment variable not set");
+            logger.error("DISCORD_GUILD_ID not set - skipping Discord fetch");
+            return new ArrayList<>();
         }
 
         List<DiscordMember> discordMembers = new ArrayList<>();

@@ -15,9 +15,9 @@ import java.sql.SQLException;
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 
-// Execute.java - Simplified for cron jobs
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
+    public static final Postgres postgres = new Postgres();
 
     public static void main(String[] args) throws SQLException, IOException {
         logger.info("Application starting...");

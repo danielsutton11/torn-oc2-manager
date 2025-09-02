@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static com.Torn.Execute.postgres;
+
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);
@@ -28,7 +30,7 @@ public class ValidateApiKeys {
             .build();
 
     private static final int RATE_LIMIT_DELAY_MS = 2000; // 2 seconds between API calls
-    private static final Postgres postgres = new Postgres();
+
 
     public static void Validate() throws SQLException, IOException {
         logger.info("Starting API key validation process");
