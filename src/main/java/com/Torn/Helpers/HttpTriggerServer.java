@@ -1,5 +1,6 @@
-package com.Torn.FactionCrimes;
+package com.Torn.Helpers;
 
+import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -14,10 +15,10 @@ import java.util.concurrent.Executors;
 public class HttpTriggerServer {
     private static final Logger logger = LoggerFactory.getLogger(HttpTriggerServer.class);
     private static final int DEFAULT_PORT = 8080;
-    private final AvailableCrimesPoller.CrimesPollingJob pollingJob;
+    private final GetAvailableCrimes.CrimesPollingJob pollingJob;
     private HttpServer server;
 
-    public HttpTriggerServer(AvailableCrimesPoller.CrimesPollingJob pollingJob) {
+    public HttpTriggerServer(GetAvailableCrimes.CrimesPollingJob pollingJob) {
         this.pollingJob = pollingJob;
     }
 

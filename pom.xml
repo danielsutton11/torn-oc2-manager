@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.Torn.FactionCrimes</groupId>
-    <artifactId>torn-crimes-poller</artifactId>
+    <artifactId>torn-organised-crimes-manager</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
@@ -127,7 +127,7 @@
                             </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.Torn.FactionCrimes.AvailableCrimesPoller</mainClass>
+                                    <mainClass>com.Torn.FactionCrimes.Available.GetAvailableCrimes</mainClass>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>

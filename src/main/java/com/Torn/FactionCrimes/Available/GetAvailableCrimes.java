@@ -1,9 +1,12 @@
-package com.Torn.FactionCrimes;
+package com.Torn.FactionCrimes.Available;
 
-import com.Torn.FactionCrimes.CrimesModel.*;
-import com.Torn.FactionCrimes.Helpers.Constants;
-import com.Torn.FactionCrimes.ItemMarketModel.Item;
-import com.Torn.FactionCrimes.ItemMarketModel.ItemMarketResponse;
+import com.Torn.FactionCrimes.Models.CrimesModel.Crime;
+import com.Torn.FactionCrimes.Models.CrimesModel.CrimesResponse;
+import com.Torn.FactionCrimes.Models.CrimesModel.Slot;
+import com.Torn.Helpers.Constants;
+import com.Torn.Helpers.HttpTriggerServer;
+import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
+import com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.quartz.*;
@@ -32,9 +35,9 @@ import okhttp3.*;
 
 
 
-public class AvailableCrimesPoller {
+public class GetAvailableCrimes {
 
-    private static final Logger logger = LoggerFactory.getLogger(AvailableCrimesPoller.class);
+    private static final Logger logger = LoggerFactory.getLogger(GetAvailableCrimes.class);
     private static final int POLLING_INTERVAL_MINUTES = getPollingInterval();
 
     public static void main(String[] args) {
@@ -265,7 +268,7 @@ public class AvailableCrimesPoller {
         private final ConcurrentHashMap<Long, Item> itemCache = new ConcurrentHashMap<>();
 
         private void processCrime(Connection conn, Crime crime) throws SQLException {
-            // Delete existing rows for this crime (in case of update)
+
             try (PreparedStatement delete = conn.prepareStatement("DELETE FROM Available_Faction_Crimes_Slots WHERE crime_id = ?")) {
                 delete.setLong(1, crime.getId());
                 delete.executeUpdate();
@@ -292,11 +295,15 @@ public class AvailableCrimesPoller {
                     List<Slot> group = entry.getValue();
                     group.sort(Comparator.comparing(Slot::getPositionId, Comparator.nullsLast(String::compareTo)));
 
-                    for (int i = 0; i < group.size(); i++) {
-                        Slot slot = group.get(i);
-                        String renamedPosition = slot.getPosition() + " #" + (i + 1);
-                        slot.setPosition(renamedPosition);
-                        orderedSlots.add(slot);
+                    if (group.size() == 1) {
+                        orderedSlots.add(group.get(0)); // Keep original position name
+                    } else {
+                        for (int i = 0; i < group.size(); i++) {
+                            Slot slot = group.get(i);
+                            String renamedPosition = slot.getPosition() + " #" + (i + 1);
+                            slot.setPosition(renamedPosition);
+                            orderedSlots.add(slot);
+                        }
                     }
                 }
 

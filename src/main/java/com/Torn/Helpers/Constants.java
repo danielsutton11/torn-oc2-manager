@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.Helpers;
+package com.Torn.Helpers;
 
 public class Constants {
 

@@ -1,4 +1,4 @@
-package com.Torn.FactionCrimes.CrimesModel;
+package com.Torn.FactionCrimes.Models.CrimesModel;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

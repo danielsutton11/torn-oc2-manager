@@ -26,7 +26,7 @@
             <configuration>
               <transformers>
                 <transformer>
-                  <mainClass>com.Torn.FactionCrimes.AvailableCrimesPoller</mainClass>
+                  <mainClass>com.Torn.FactionCrimes.Available.GetAvailableCrimes</mainClass>
                 </transformer>
               </transformers>
               <finalName>torn-crimes-poller</finalName>
