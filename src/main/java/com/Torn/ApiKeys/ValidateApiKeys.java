@@ -175,7 +175,6 @@ public class ValidateApiKeys {
                 logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
             }
 
-            // Now we can call updateApiKeyStatus with the faction ID
             updateApiKeyStatus(apiKey, factionId, isValid, connection);
             return isValid;
 

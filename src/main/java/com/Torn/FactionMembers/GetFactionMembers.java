@@ -15,10 +15,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 public class GetFactionMembers {
@@ -88,9 +86,20 @@ public class GetFactionMembers {
     public static void fetchAndProcessAllFactionMembers(Connection connection) throws SQLException, IOException {
         logger.info("Starting to fetch faction members for all factions");
 
-        // Step 1: Get Discord members
-        List<GetDiscordMembers.DiscordMember> discordMembers = GetDiscordMembers.fetchDiscordMembers().join();
-        assert discordMembers != null;
+        // Step 1: Get Discord members (with error handling)
+        List<GetDiscordMembers.DiscordMember> discordMembers;
+        try {
+            CompletableFuture<List<GetDiscordMembers.DiscordMember>> discordFuture = GetDiscordMembers.fetchDiscordMembers();
+            discordMembers = discordFuture != null ? discordFuture.join() : new ArrayList<>();
+            if (discordMembers == null) {
+                logger.error("Failed to fetch Discord members - continuing with faction sync only");
+                discordMembers = new ArrayList<>();
+            }
+        } catch (Exception e) {
+            logger.error("Discord API failed: {} - continuing with faction sync only", e.getMessage());
+            discordMembers = new ArrayList<>();
+        }
+
         Map<String, GetDiscordMembers.DiscordMember> discordMemberMap = createDiscordMemberMap(discordMembers);
         logger.info("Created Discord member map with {} members", discordMembers.size());
 
@@ -103,6 +112,9 @@ public class GetFactionMembers {
 
         // Step 3: Process each faction with rate limiting
         int processedCount = 0;
+        int successfulCount = 0;
+        int failedCount = 0;
+
         for (FactionInfo factionInfo : factions) {
             try {
                 logger.info("Processing faction: {} ({}/{})",
@@ -111,14 +123,20 @@ public class GetFactionMembers {
                 // Fetch faction members
                 List<FactionMember> factionMembers = fetchFactionMembers(factionInfo);
 
-                // Join with Discord data
-                joinWithDiscordData(factionMembers, discordMemberMap);
+                if (factionMembers != null) {
+                    // Join with Discord data
+                    joinWithDiscordData(factionMembers, discordMemberMap);
 
-                // Write to database
-                writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
+                    // Write to database
+                    writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
 
-                logger.info("Successfully processed {} members for faction {}",
-                        factionMembers.size(), factionInfo.getFactionId());
+                    logger.info("✓ Successfully processed {} members for faction {}",
+                            factionMembers.size(), factionInfo.getFactionId());
+                    successfulCount++;
+                } else {
+                    logger.error("✗ Failed to fetch members for faction {} - skipping", factionInfo.getFactionId());
+                    failedCount++;
+                }
 
                 processedCount++;
 
@@ -133,12 +151,19 @@ public class GetFactionMembers {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                logger.error("Error processing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
-                // Continue with other factions
+                logger.error("✗ Error processing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
+                failedCount++;
+                // Continue with other factions instead of failing completely
             }
         }
 
-        logger.info("Completed processing {} of {} factions", processedCount, factions.size());
+        logger.info("Faction processing summary: {} processed, {} successful, {} failed",
+                processedCount, successfulCount, failedCount);
+
+        // If more than half failed, this might indicate a systemic issue
+        if (failedCount > successfulCount && processedCount > 2) {
+            logger.error("⚠ More than half of factions failed - Torn API may be experiencing issues");
+        }
     }
 
     private static Map<String, GetDiscordMembers.DiscordMember> createDiscordMemberMap(List<GetDiscordMembers.DiscordMember> discordMembers) {
@@ -191,7 +216,6 @@ public class GetFactionMembers {
         logger.info("Found {} active factions to process", factions.size());
         return factions;
     }
-
 
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
@@ -361,7 +385,7 @@ public class GetFactionMembers {
                 pstmt.setString(2, member.getUsername());                  // Parameter 2
                 pstmt.setBoolean(3, member.isUserInDiscord());             // Parameter 3
                 pstmt.setString(4, member.getUserDiscordId());             // Parameter 4
-                pstmt.setString(5, member.getUserDiscordMentionId());      // Parameter 5 - THIS WAS MISSING!
+                pstmt.setString(5, member.getUserDiscordMentionId());      // Parameter 5
                 pstmt.addBatch();
             }
 
