@@ -1,8 +1,10 @@
 package com.Torn.FactionCrimes.Models.CrimesModel;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Crime {
     @JsonProperty("id")
     private Long id;
