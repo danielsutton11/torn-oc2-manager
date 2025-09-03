@@ -343,7 +343,7 @@ public class GetFactionMembers {
         connection.setAutoCommit(false);
         try {
             clearExistingData(connection, tableName);
-            insertFactionMembers(connection, tableName, members);
+            insertFactionMembers(connection, tableName, members, factionInfo.getFactionId());
             connection.commit();
             logger.info("Successfully updated table {} with {} members", tableName, members.size());
         } catch (SQLException e) {
@@ -360,6 +360,7 @@ public class GetFactionMembers {
         String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
                 "user_id VARCHAR(20) PRIMARY KEY, " +
                 "username VARCHAR(100) NOT NULL, " +
+                "faction_id BIGINT NOT NULL, " +
                 "user_in_discord BOOLEAN DEFAULT FALSE, " +
                 "user_discord_id VARCHAR(50), " +
                 "user_discord_mention_id VARCHAR(50), " +
@@ -383,27 +384,37 @@ public class GetFactionMembers {
     }
 
     private static void insertFactionMembers(Connection connection, String tableName,
-                                             List<FactionMember> members) throws SQLException {
+                                             List<FactionMember> members, String factionId) throws SQLException {
         if (members.isEmpty()) {
             logger.info("No members to insert into {}", tableName);
             return;
         }
 
-        String sql = "INSERT INTO " + tableName + " (user_id, username, user_in_discord, user_discord_id, user_discord_mention_id, updated_at) " +
-                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        // Fixed: Column name is faction_id (not userFactionId) and added the missing parameter
+        String sql = "INSERT INTO " + tableName + " (user_id, username, faction_id, user_in_discord, user_discord_id, user_discord_mention_id, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            long factionIdLong;
+            try {
+                factionIdLong = Long.parseLong(factionId);
+            } catch (NumberFormatException e) {
+                logger.error("Invalid faction ID format: {} - cannot convert to number", factionId);
+                throw new SQLException("Invalid faction ID format: " + factionId, e);
+            }
+
             for (FactionMember member : members) {
-                pstmt.setString(1, member.getUserId());                    // Parameter 1
-                pstmt.setString(2, member.getUsername());                  // Parameter 2
-                pstmt.setBoolean(3, member.isUserInDiscord());             // Parameter 3
-                pstmt.setString(4, member.getUserDiscordId());             // Parameter 4
-                pstmt.setString(5, member.getUserDiscordMentionId());      // Parameter 5
+                pstmt.setString(1, member.getUserId());                    // Parameter 1: user_id
+                pstmt.setString(2, member.getUsername());                  // Parameter 2: username
+                pstmt.setLong(3, factionIdLong);                          // Parameter 3: faction_id (BIGINT)
+                pstmt.setBoolean(4, member.isUserInDiscord());            // Parameter 4: user_in_discord
+                pstmt.setString(5, member.getUserDiscordId());            // Parameter 5: user_discord_id
+                pstmt.setString(6, member.getUserDiscordMentionId());     // Parameter 6: user_discord_mention_id
                 pstmt.addBatch();
             }
 
             int[] results = pstmt.executeBatch();
-            logger.info("Inserted {} members into {}", results.length, tableName);
+            logger.info("Inserted {} members into {} with faction_id {}", results.length, tableName, factionId);
         }
     }
 }
