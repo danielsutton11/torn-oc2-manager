@@ -1,5 +1,6 @@
 package com.Torn;
 
+import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
 import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
@@ -56,7 +57,7 @@ public class Execute {
                     break;
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES:
                     logger.info("Running available crimes check job");
-                    // Add your implementation
+                    GetAvailableCrimes.fetchAndProcessAllAvailableCrimes();
                     break;
                 default:
                     logger.error("Unknown job code: {}", jobCode);
