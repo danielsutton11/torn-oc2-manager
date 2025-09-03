@@ -149,43 +149,43 @@ public class ValidateApiKeys {
     private static ValidationResult processApiResponse(ApiResponse response, String maskedKey, String factionId) {
         switch (response.getType()) {
             case SUCCESS:
-                logger.info("✓ API key validation successful for key: {} and faction: {}", maskedKey, factionId);
+                logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
                 return ValidationResult.success();
 
             case AUTHENTICATION_ERROR:
-                logger.error("✗ API key {} for faction {} is invalid or expired", maskedKey, factionId);
+                logger.error("API key {} for faction {} is invalid or expired", maskedKey, factionId);
                 return ValidationResult.permanentFailure("Invalid or expired API key");
 
             case AUTHORIZATION_ERROR:
-                logger.error("✗ API key {} for faction {} lacks required permissions", maskedKey, factionId);
+                logger.error("API key {} for faction {} lacks required permissions", maskedKey, factionId);
                 return ValidationResult.permanentFailure("Insufficient permissions");
 
             case RATE_LIMITED:
-                logger.warn("⚠ Rate limited for key {} and faction {} - will retry later", maskedKey, factionId);
+                logger.warn("Rate limited for key {} and faction {} - will retry later", maskedKey, factionId);
                 return ValidationResult.temporaryFailure("Rate limited");
 
             case SERVER_ERROR:
-                logger.warn("⚠ Torn API server error for key {} and faction {} - will retry later", maskedKey, factionId);
+                logger.warn("Torn API server error for key {} and faction {} - will retry later", maskedKey, factionId);
                 return ValidationResult.temporaryFailure("Server error");
 
             case NETWORK_ERROR:
-                logger.warn("⚠ Network error for key {} and faction {} - will retry later", maskedKey, factionId);
+                logger.warn("Network error for key {} and faction {} - will retry later", maskedKey, factionId);
                 return ValidationResult.temporaryFailure("Network error");
 
             case CIRCUIT_BREAKER_OPEN:
-                logger.error("⚠ Circuit breaker is open - stopping validation for key {} and faction {}", maskedKey, factionId);
+                logger.error("Circuit breaker is open - stopping validation for key {} and faction {}", maskedKey, factionId);
                 return ValidationResult.circuitBreakerOpen();
 
             case MAX_RETRIES_EXCEEDED:
-                logger.error("✗ Max retries exceeded for key {} and faction {}", maskedKey, factionId);
+                logger.error("Max retries exceeded for key {} and faction {}", maskedKey, factionId);
                 return ValidationResult.temporaryFailure("Max retries exceeded");
 
             case INTERRUPTED:
-                logger.warn("⚠ Validation interrupted for key {} and faction {}", maskedKey, factionId);
+                logger.warn("Validation interrupted for key {} and faction {}", maskedKey, factionId);
                 return ValidationResult.temporaryFailure("Operation interrupted");
 
             default:
-                logger.error("✗ Unknown error for key {} and faction {}: {}",
+                logger.error("Unknown error for key {} and faction {}: {}",
                         maskedKey, factionId, response.getErrorMessage());
                 return ValidationResult.temporaryFailure("Unknown error: " + response.getErrorMessage());
         }

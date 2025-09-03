@@ -176,6 +176,7 @@ public class GetAvailableCrimes {
                     "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
                     "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
                     "WHERE ak." + Constants.COLUMN_NAME_ACTIVE + " = true " +
+                    "AND f.oc2_enabled = true " +
                     "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID + ", ak." + Constants.COLUMN_NAME_API_KEY;
 
             try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
@@ -269,7 +270,7 @@ public class GetAvailableCrimes {
             }
 
             // Create faction-specific table
-            String tableName = "available_crimes_" + factionInfo.getDbSuffix();
+            String tableName = "a_crimes_" + factionInfo.getDbSuffix();
             createCrimesTableIfNotExists(connection, tableName);
 
             // Filter and sort crimes

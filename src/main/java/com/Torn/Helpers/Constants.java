@@ -10,7 +10,7 @@ public class Constants {
     public static final String JOB_UPDATE_OVERVIEW_DATA = "OVERVIEW_UPDATE";
     public static final String JOB_UPDATE_COMPLETED_DATA = "COMPLETED_CRIMES";
     public static final String JOB_CHECK_USER_ITEMS = "CHECK_ITEMS";
-    public static final String JOB_CHECK_AVAILABLE_CRIMES = "AVAILABLE_CRIMES_MEMBERS";
+    public static final String JOB_CHECK_AVAILABLE_CRIMES_MEMBERS = "AVAILABLE_CRIMES_MEMBERS";
 
     public static final String DATABASE_URL_CONFIG = "DATABASE_URL_CONFIG";
     public static final String DATABASE_URL_OC_DATA = "DATABASE_URL_OC_DATA";
@@ -32,7 +32,7 @@ public class Constants {
 
     //TORN API ENDPOINTS
     public static final String API_URL_TORN_BASE_URL = "https://api.torn.com/v2/";
-    public static final String API_URL_VALIDATE_KEY = API_URL_TORN_BASE_URL + "faction/basic";
+    public static final String API_URL_VALIDATE_KEY = API_URL_TORN_BASE_URL + "faction/crimes";
     public static final String API_URL_FACTION = API_URL_TORN_BASE_URL + "faction/";
     public static final String API_URL_FACTION_MEMBERS = "/members?key=";
     public static final String API_URL_AVAILABLE_FACTION_CRIMES = API_URL_TORN_BASE_URL + "faction/crimes?cat=available&offset=0&sort=DESC";
