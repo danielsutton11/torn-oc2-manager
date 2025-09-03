@@ -10,7 +10,7 @@ public class Constants {
     public static final String JOB_UPDATE_OVERVIEW_DATA = "OVERVIEW_UPDATE";
     public static final String JOB_UPDATE_COMPLETED_DATA = "COMPLETED_CRIMES";
     public static final String JOB_CHECK_USER_ITEMS = "CHECK_ITEMS";
-    public static final String JOB_CHECK_AVAILABLE_CRIMES = "AVAILABLE_CRIMES";
+    public static final String JOB_CHECK_AVAILABLE_CRIMES = "AVAILABLE_CRIMES_MEMBERS";
 
     public static final String DATABASE_URL_CONFIG = "DATABASE_URL_CONFIG";
     public static final String DATABASE_URL_OC_DATA = "DATABASE_URL_OC_DATA";
