@@ -1,5 +1,7 @@
 package com.Torn.ApiKeys;
 
+import com.Torn.Api.ApiResponse;
+import com.Torn.Api.TornApiHandler;
 import com.Torn.Helpers.Constants;
 import com.Torn.Execute;
 import okhttp3.OkHttpClient;
@@ -15,19 +17,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);
-
-    private static final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build();
-
-    private static final int RATE_LIMIT_DELAY_MS = 2000;
 
     // New class to hold API key info including faction_id
     public static class ApiKeyInfo {
@@ -46,8 +39,8 @@ public class ValidateApiKeys {
         public String getOwnerName() { return ownerName; }
     }
 
-    public static void Validate() throws SQLException, IOException {
-        logger.info("Starting API key validation process");
+    public static void Validate() throws SQLException {
+        logger.info("Starting API key validation process with robust error handling");
 
         String databaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         if (databaseUrl == null || databaseUrl.isEmpty()) {
@@ -67,40 +60,150 @@ public class ValidateApiKeys {
 
             logger.info("Found {} API keys to validate", apiKeys.size());
 
+            // Check circuit breaker status before starting
+            TornApiHandler.CircuitBreakerStatus cbStatus = TornApiHandler.getCircuitBreakerStatus();
+            logger.info("Circuit breaker status: {}", cbStatus);
+
+            if (cbStatus.isOpen()) {
+                logger.error("Circuit breaker is OPEN - skipping API key validation to prevent further failures");
+                logger.info("Circuit breaker will reset automatically after 5 minutes, or can be manually reset");
+                return;
+            }
+
             int validatedCount = 0;
             int successfulCount = 0;
+            int temporaryFailures = 0;
+            int permanentFailures = 0;
 
             for (ApiKeyInfo apiKeyInfo : apiKeys) {
                 try {
-                    boolean isValid = validateApiKey(apiKeyInfo, connection);
-                    if (isValid) {
-                        successfulCount++;
+                    ValidationResult result = validateApiKeyRobust(apiKeyInfo, connection);
+
+                    switch (result.getStatus()) {
+                        case SUCCESS:
+                            successfulCount++;
+                            break;
+                        case TEMPORARY_FAILURE:
+                            temporaryFailures++;
+                            break;
+                        case PERMANENT_FAILURE:
+                            permanentFailures++;
+                            break;
+                        case CIRCUIT_BREAKER_OPEN:
+                            logger.error("Circuit breaker opened during validation - stopping remaining validations");
+                            break;
                     }
+
                     validatedCount++;
 
-                    // Rate limiting - wait between API calls (except for the last one)
-                    if (validatedCount < apiKeys.size()) {
-                        logger.debug("Waiting {}ms before next API validation", RATE_LIMIT_DELAY_MS);
-                        Thread.sleep(RATE_LIMIT_DELAY_MS);
+                    // If circuit breaker opened, stop processing
+                    if (result.getStatus() == ValidationResult.Status.CIRCUIT_BREAKER_OPEN) {
+                        break;
                     }
 
-                } catch (InterruptedException e) {
-                    logger.warn("API key validation interrupted");
-                    Thread.currentThread().interrupt();
-                    break;
                 } catch (Exception e) {
-                    logger.error("Error validating API key {} for faction {}: {}",
+                    logger.error("Unexpected error validating API key {} for faction {}: {}",
                             maskApiKey(apiKeyInfo.getApiKey()), apiKeyInfo.getFactionId(), e.getMessage());
+                    permanentFailures++;
+                    validatedCount++;
                 }
             }
 
-            logger.info("API key validation completed. Validated: {}, Successful: {}",
-                    validatedCount, successfulCount);
+            // Final summary
+            logger.info("API key validation completed:");
+            logger.info("  Total processed: {}/{}", validatedCount, apiKeys.size());
+            logger.info("  Successful: {}", successfulCount);
+            logger.info("  Temporary failures (will retry later): {}", temporaryFailures);
+            logger.info("  Permanent failures (need attention): {}", permanentFailures);
+
+            // Log circuit breaker final status
+            cbStatus = TornApiHandler.getCircuitBreakerStatus();
+            logger.info("Final circuit breaker status: {}", cbStatus);
 
         } catch (SQLException e) {
             logger.error("Database error during API key validation", e);
             throw e;
         }
+    }
+
+    private static ValidationResult validateApiKeyRobust(ApiKeyInfo apiKeyInfo, Connection connection) throws SQLException {
+        String apiKey = apiKeyInfo.getApiKey();
+        String factionId = apiKeyInfo.getFactionId();
+        String maskedKey = maskApiKey(apiKey);
+
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            logger.warn("Skipping empty or null API key for faction {}", factionId);
+            return ValidationResult.permanentFailure("Empty or null API key");
+        }
+
+        logger.debug("Validating API key: {} for faction: {}", maskedKey, factionId);
+
+        // Use the robust API handler
+        ApiResponse response = TornApiHandler.executeRequest(Constants.API_URL_VALIDATE_KEY, apiKey);
+
+        // Handle different response types
+        ValidationResult result = processApiResponse(response, maskedKey, factionId);
+
+        // Update database based on result
+        updateApiKeyStatusFromResult(apiKey, factionId, result, connection);
+
+        return result;
+    }
+
+    private static ValidationResult processApiResponse(ApiResponse response, String maskedKey, String factionId) {
+        switch (response.getType()) {
+            case SUCCESS:
+                logger.info("✓ API key validation successful for key: {} and faction: {}", maskedKey, factionId);
+                return ValidationResult.success();
+
+            case AUTHENTICATION_ERROR:
+                logger.error("✗ API key {} for faction {} is invalid or expired", maskedKey, factionId);
+                return ValidationResult.permanentFailure("Invalid or expired API key");
+
+            case AUTHORIZATION_ERROR:
+                logger.error("✗ API key {} for faction {} lacks required permissions", maskedKey, factionId);
+                return ValidationResult.permanentFailure("Insufficient permissions");
+
+            case RATE_LIMITED:
+                logger.warn("⚠ Rate limited for key {} and faction {} - will retry later", maskedKey, factionId);
+                return ValidationResult.temporaryFailure("Rate limited");
+
+            case SERVER_ERROR:
+                logger.warn("⚠ Torn API server error for key {} and faction {} - will retry later", maskedKey, factionId);
+                return ValidationResult.temporaryFailure("Server error");
+
+            case NETWORK_ERROR:
+                logger.warn("⚠ Network error for key {} and faction {} - will retry later", maskedKey, factionId);
+                return ValidationResult.temporaryFailure("Network error");
+
+            case CIRCUIT_BREAKER_OPEN:
+                logger.error("⚠ Circuit breaker is open - stopping validation for key {} and faction {}", maskedKey, factionId);
+                return ValidationResult.circuitBreakerOpen();
+
+            case MAX_RETRIES_EXCEEDED:
+                logger.error("✗ Max retries exceeded for key {} and faction {}", maskedKey, factionId);
+                return ValidationResult.temporaryFailure("Max retries exceeded");
+
+            case INTERRUPTED:
+                logger.warn("⚠ Validation interrupted for key {} and faction {}", maskedKey, factionId);
+                return ValidationResult.temporaryFailure("Operation interrupted");
+
+            default:
+                logger.error("✗ Unknown error for key {} and faction {}: {}",
+                        maskedKey, factionId, response.getErrorMessage());
+                return ValidationResult.temporaryFailure("Unknown error: " + response.getErrorMessage());
+        }
+    }
+
+    private static void updateApiKeyStatusFromResult(String apiKey, String factionId, ValidationResult result, Connection connection) throws SQLException {
+        // Only update status for definitive results
+        if (result.getStatus() == ValidationResult.Status.SUCCESS) {
+            updateApiKeyStatus(apiKey, factionId, true, connection);
+        } else if (result.getStatus() == ValidationResult.Status.PERMANENT_FAILURE) {
+            updateApiKeyStatus(apiKey, factionId, false, connection);
+        }
+        // For temporary failures and circuit breaker, don't change the status
+        // This allows the key to be retried on the next run
     }
 
     // Updated method to get API keys with faction information
@@ -136,56 +239,6 @@ public class ValidateApiKeys {
 
         return apiKeys;
     }
-
-    // Updated validateApiKey method that takes ApiKeyInfo instead of just the key
-    private static boolean validateApiKey(ApiKeyInfo apiKeyInfo, Connection connection) throws IOException, SQLException {
-        String apiKey = apiKeyInfo.getApiKey();
-        String factionId = apiKeyInfo.getFactionId();
-
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            logger.warn("Skipping empty or null API key for faction {}", factionId);
-            return false;
-        }
-
-        String maskedKey = maskApiKey(apiKey);
-        logger.debug("Validating API key: {} for faction: {}", maskedKey, factionId);
-
-        Request request = new Request.Builder()
-                .url(Constants.API_URL_VALIDATE_KEY)
-                .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
-                .addHeader(Constants.HEADER_AUTHORIZATION, Constants.HEADER_TORN_AUTHORIZATION_VALUE + apiKey)
-                .build();
-
-        try (Response response = client.newCall(request).execute()) {
-            boolean isValid = response.isSuccessful();
-
-            if (!isValid) {
-                logger.warn("API key validation failed for key: {} and faction: {} (Response code: {})",
-                        maskedKey, factionId, response.code());
-
-                if (response.code() == 401) {
-                    logger.debug("API key {} for faction {} is unauthorized (invalid)", maskedKey, factionId);
-                } else if (response.code() == 429) {
-                    logger.warn("Rate limited by Torn API for key {} and faction {}", maskedKey, factionId);
-                } else {
-                    logger.warn("Unexpected response code {} for key {} and faction {}",
-                            response.code(), maskedKey, factionId);
-                }
-            } else {
-                logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
-            }
-
-            updateApiKeyStatus(apiKey, factionId, isValid, connection);
-            return isValid;
-
-        } catch (Exception e) {
-            logger.error("Exception during API validation for key {} and faction {}: {}",
-                    maskedKey, factionId, e.getMessage());
-            throw e;
-        }
-    }
-
-    // Updated updateApiKeyStatus method that requires faction ID
     private static void updateApiKeyStatus(String apiKey, String factionId, boolean active, Connection connection) throws SQLException {
         if (!isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
             throw new IllegalArgumentException("Invalid active column name");
@@ -225,5 +278,42 @@ public class ValidateApiKeys {
             return "****";
         }
         return apiKey.substring(0, 4) + "****" + apiKey.substring(apiKey.length() - 4);
+    }
+
+    // Helper class for validation results
+    private static class ValidationResult {
+        public enum Status {
+            SUCCESS,
+            TEMPORARY_FAILURE,
+            PERMANENT_FAILURE,
+            CIRCUIT_BREAKER_OPEN
+        }
+
+        private final Status status;
+        private final String message;
+
+        private ValidationResult(Status status, String message) {
+            this.status = status;
+            this.message = message;
+        }
+
+        public static ValidationResult success() {
+            return new ValidationResult(Status.SUCCESS, "Valid API key");
+        }
+
+        public static ValidationResult temporaryFailure(String message) {
+            return new ValidationResult(Status.TEMPORARY_FAILURE, message);
+        }
+
+        public static ValidationResult permanentFailure(String message) {
+            return new ValidationResult(Status.PERMANENT_FAILURE, message);
+        }
+
+        public static ValidationResult circuitBreakerOpen() {
+            return new ValidationResult(Status.CIRCUIT_BREAKER_OPEN, "Circuit breaker is open");
+        }
+
+        public Status getStatus() { return status; }
+        public String getMessage() { return message; }
     }
 }

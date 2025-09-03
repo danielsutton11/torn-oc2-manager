@@ -1,5 +1,7 @@
 package com.Torn.FactionMembers;
 
+import com.Torn.Api.ApiResponse;
+import com.Torn.Api.TornApiHandler;
 import com.Torn.Discord.Members.GetDiscordMembers;
 import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -231,37 +233,45 @@ public class GetFactionMembers {
         String url = Constants.API_URL_FACTION + factionInfo.getFactionId() +
                 Constants.API_URL_FACTION_MEMBERS + factionInfo.getApiKey();
 
-        logger.debug("Fetching faction members from: {}", url.replaceAll("key=[^&]+", "key=***"));
+        logger.debug("Fetching faction members for faction: {}", factionInfo.getFactionId());
 
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader(Constants.HEADER_ACCEPT, Constants.HEADER_ACCEPT_VALUE)
-                .build();
+        // Use the robust API handler instead of direct HTTP call
+        ApiResponse response = TornApiHandler.executeRequest(url, factionInfo.getApiKey());
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                logger.error("Failed to fetch faction members for faction {}: HTTP {}",
-                        factionInfo.getFactionId(), response.code());
+        // Handle different response types
+        if (response.isSuccess()) {
+            logger.info("✓ Successfully fetched faction members for faction {}", factionInfo.getFactionId());
+            return parseFactionMembers(response.getBody(), factionInfo);
 
-                if (response.code() == 401) {
-                    logger.error("API key may be invalid for faction {}", factionInfo.getFactionId());
-                } else if (response.code() == 429) {
-                    logger.warn("Rate limited by Torn API for faction {}", factionInfo.getFactionId());
-                }
+        } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {
+            logger.error("Circuit breaker is open - skipping faction {} to prevent further API failures",
+                    factionInfo.getFactionId());
+            throw new IOException("Circuit breaker open - API calls suspended");
 
-                throw new IOException("API request failed: " + response.code());
-            }
+        } else if (response.isAuthenticationIssue()) {
+            logger.error("API key authentication issue for faction {}: {}",
+                    factionInfo.getFactionId(), response.getErrorMessage());
+            throw new IOException("API key authentication failed: " + response.getErrorMessage());
 
-            if (response.body() == null) {
-                throw new IOException("Torn API response body is null");
-            }
+        } else if (response.isTemporaryError()) {
+            logger.warn("Temporary API error for faction {} (will retry on next run): {}",
+                    factionInfo.getFactionId(), response.getErrorMessage());
+            throw new IOException("Temporary API error: " + response.getErrorMessage());
 
-            String responseBody = response.body().string();
-            logger.debug("Raw API response for faction {}: {}", factionInfo.getFactionId(), responseBody);
+        } else {
+            logger.error("Permanent API error for faction {}: {}",
+                    factionInfo.getFactionId(), response.getErrorMessage());
+            throw new IOException("API error: " + response.getErrorMessage());
+        }
+    }
 
+    private static List<FactionMember> parseFactionMembers(String responseBody, FactionInfo factionInfo) throws IOException {
+        List<FactionMember> members = new ArrayList<>();
+
+        try {
             JsonNode jsonResponse = objectMapper.readTree(responseBody);
 
-            // Check for API error
+            // Check for API error in response
             if (jsonResponse.has("error")) {
                 String errorMsg = jsonResponse.get("error").asText();
                 logger.error("Torn API Error for faction {}: {}", factionInfo.getFactionId(), errorMsg);
@@ -273,7 +283,6 @@ public class GetFactionMembers {
             if (membersNode != null && membersNode.isArray()) {
                 for (JsonNode memberNode : membersNode) {
                     try {
-                        // Get ID and name from each member object
                         JsonNode idNode = memberNode.get(Constants.ID);
                         JsonNode nameNode = memberNode.get(Constants.NAME);
 
@@ -291,9 +300,13 @@ public class GetFactionMembers {
             } else {
                 logger.warn("No members array found in API response for faction {}", factionInfo.getFactionId());
             }
+
+        } catch (Exception e) {
+            logger.error("Error parsing JSON response for faction {}: {}", factionInfo.getFactionId(), e.getMessage());
+            throw new IOException("JSON parsing error: " + e.getMessage());
         }
 
-        logger.info("Fetched {} members for faction {}", members.size(), factionInfo.getFactionId());
+        logger.info("Parsed {} members for faction {}", members.size(), factionInfo.getFactionId());
         return members;
     }
 
