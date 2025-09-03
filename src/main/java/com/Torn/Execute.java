@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProcessAllAvailableCrimes;
+import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
 import static com.Torn.FactionMembers.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 
@@ -50,6 +51,7 @@ public class Execute {
                     break;
                 case Constants.JOB_UPDATE_COMPLETED_DATA:
                     logger.info("Running completed data update job");
+                    fetchAndProcessAllCompletedCrimes();
                     // Add your implementation
                     break;
                 case Constants.JOB_CHECK_USER_ITEMS:
@@ -60,6 +62,7 @@ public class Execute {
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
                     fetchAndProcessAllAvailableMembers();
+                    //TODO: Work out who should join what crime
                     break;
                 default:
                     logger.error("Unknown job code: {}", jobCode);
