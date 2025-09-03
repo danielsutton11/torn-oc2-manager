@@ -1,16 +1,10 @@
 package com.Torn;
 
-import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
-import com.Torn.Helpers.HttpTriggerServer;
-import com.Torn.Postgres.Postgres; // Add this import
-import org.quartz.*;
-import org.quartz.impl.StdSchedulerFactory;
+import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.sql.SQLException;
 
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
@@ -19,7 +13,7 @@ public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
     public static final Postgres postgres = new Postgres();
 
-    public static void main(String[] args) throws SQLException, IOException {
+    public static void main(String[] args) {
         logger.info("Application starting...");
 
         // Load PostgreSQL driver

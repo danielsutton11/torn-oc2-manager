@@ -4,13 +4,9 @@ import com.Torn.Api.ApiResponse;
 import com.Torn.Api.TornApiHandler;
 import com.Torn.Helpers.Constants;
 import com.Torn.Execute;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -239,6 +235,7 @@ public class ValidateApiKeys {
 
         return apiKeys;
     }
+
     private static void updateApiKeyStatus(String apiKey, String factionId, boolean active, Connection connection) throws SQLException {
         if (!isValidIdentifier(Constants.COLUMN_NAME_ACTIVE)) {
             throw new IllegalArgumentException("Invalid active column name");
@@ -247,12 +244,12 @@ public class ValidateApiKeys {
         String sql = "UPDATE " + Constants.TABLE_NAME_API_KEYS +
                 " SET " + Constants.COLUMN_NAME_ACTIVE + " = ? " +
                 " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ? " +
-                " AND " + Constants.COLUMN_NAME_FACTION_ID + " = ?";
+                " AND " + Constants.COLUMN_NAME_FACTION_ID + " = ?::bigint"; // Cast to bigint
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setBoolean(1, active);
             pstmt.setString(2, apiKey);
-            pstmt.setString(3, factionId);
+            pstmt.setString(3, factionId); // Still pass as string, but SQL will cast it
 
             int rowsAffected = pstmt.executeUpdate();
             if (rowsAffected > 0) {
