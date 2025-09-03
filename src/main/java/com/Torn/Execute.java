@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProcessAllAvailableCrimes;
 import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
+import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
 import static com.Torn.FactionMembers.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 
@@ -57,6 +58,10 @@ public class Execute {
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
                     // Add your implementation
+                    break;
+                case Constants.JOB_UPDATE_CRIMES_PAID_DATA:
+                    logger.info("Running paid crimes data update job");
+                    fetchAndProcessAllPaidCrimes();
                     break;
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");

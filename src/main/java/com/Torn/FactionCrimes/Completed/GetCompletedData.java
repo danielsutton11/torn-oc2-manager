@@ -407,11 +407,11 @@ public class GetCompletedData {
 
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "crime_id, faction_id, crime_name, difficulty, success, completed_at, completed_date_friendly, " +
-                "user_id, username, role, outcome, progress_percentage, last_updated) " +
+                "user_id, username, role, outcome, checkpoint_pass_rate, last_updated) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) " +
                 "ON CONFLICT (crime_id, user_id) DO UPDATE SET " +
                 "username = EXCLUDED.username, role = EXCLUDED.role, outcome = EXCLUDED.outcome, " +
-                "progress_percentage = EXCLUDED.progress_percentage, last_updated = CURRENT_TIMESTAMP";
+                "checkpoint_pass_rate = EXCLUDED.checkpoint_pass_rate, last_updated = CURRENT_TIMESTAMP";
 
         String rewardsTableName = "r_crimes_" + factionInfo.getDbSuffix();
         createRewardsTableIfNotExists(connection, rewardsTableName);
@@ -470,11 +470,8 @@ public class GetCompletedData {
                             finalRole = slot.getPosition() + " #" + (i + 1);
                         }
 
-                        // Calculate progress percentage
-                        Double progressPercentage = user.getProgress();
-                        if (progressPercentage != null) {
-                            progressPercentage = progressPercentage * 100; // Convert to percentage
-                        }
+                        // Get checkpoint pass rate from slot (already a percentage 0-100)
+                        Integer checkpointPassRate = slot.getCheckpointPassRate();
 
                         // Insert record
                         pstmt.setLong(1, crime.getId());
@@ -488,10 +485,10 @@ public class GetCompletedData {
                         pstmt.setString(9, username);
                         pstmt.setString(10, finalRole);
                         pstmt.setString(11, user.getOutcome());
-                        if (progressPercentage != null) {
-                            pstmt.setDouble(12, progressPercentage);
+                        if (checkpointPassRate != null) {
+                            pstmt.setInt(12, checkpointPassRate);
                         } else {
-                            pstmt.setNull(12, java.sql.Types.DOUBLE);
+                            pstmt.setNull(12, java.sql.Types.INTEGER);
                         }
 
                         pstmt.addBatch();
@@ -617,24 +614,25 @@ public class GetCompletedData {
 
 
     /**
-     * Calculate total success value from all slots
+     * Calculate total success value from all slots using checkpoint_pass_rate
      */
     private static double calculateTotalSuccessValue(Crime crime) {
         if (crime.getSlots() == null || crime.getSlots().isEmpty()) {
             return 0.0;
         }
 
-        double totalProgress = 0.0;
+        double totalPassRate = 0.0;
         int validSlots = 0;
 
         for (Slot slot : crime.getSlots()) {
-            if (slot.getUser() != null && slot.getUser().getProgress() != null) {
-                totalProgress += slot.getUser().getProgress() * 100; // Convert to percentage
+            if (slot.getCheckpointPassRate() != null) {
+                // checkpoint_pass_rate is already a percentage (0-100), don't multiply
+                totalPassRate += slot.getCheckpointPassRate();
                 validSlots++;
             }
         }
 
-        return totalProgress;
+        return totalPassRate;
     }
 
     /**
@@ -773,7 +771,7 @@ public class GetCompletedData {
     }
 
     /**
-     * Create completed crimes table if it doesn't exist
+     * Create completed crimes table with correct column name
      */
     private static void createCompletedCrimesTableIfNotExists(Connection connection, String tableName) throws SQLException {
         String createTableSql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
@@ -788,7 +786,7 @@ public class GetCompletedData {
                 "username VARCHAR(100) NOT NULL," +
                 "role VARCHAR(100) NOT NULL," +
                 "outcome VARCHAR(50)," +
-                "progress_percentage DOUBLE PRECISION," +
+                "checkpoint_pass_rate INTEGER," + // Changed from progress_percentage to checkpoint_pass_rate
                 "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "PRIMARY KEY (crime_id, user_id)" +
                 ")";
