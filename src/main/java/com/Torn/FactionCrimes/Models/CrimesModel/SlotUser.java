@@ -16,7 +16,7 @@ public class SlotUser {
     private Double progress;
 
     @JsonProperty("item_outcome")
-    private String itemOutcome;
+    private Object itemOutcome; // Changed from String to Object to handle both strings and objects
 
     // Getters and setters
     public String getOutcome() {
@@ -35,8 +35,19 @@ public class SlotUser {
         return progress;
     }
 
-    public String getItemOutcome() {
+    public Object getItemOutcome() {
         return itemOutcome;
     }
 
+    // Helper method to get item outcome as string if you need it
+    public String getItemOutcomeAsString() {
+        if (itemOutcome == null) {
+            return null;
+        }
+        if (itemOutcome instanceof String) {
+            return (String) itemOutcome;
+        }
+        // If it's an object, convert to string representation
+        return itemOutcome.toString();
+    }
 }
