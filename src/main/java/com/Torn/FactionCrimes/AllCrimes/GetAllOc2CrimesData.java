@@ -426,7 +426,7 @@ public class GetAllOc2CrimesData {
                 long nonReusableCost = calculateNonReusableCost(crime.getSlots());
 
                 // Get rewards range from OC data database
-                RewardsRange rewardsRange = getRewardsRange(ocDataConnection, crime.getName());
+                RewardsRange rewardsRange = getRewardsRange(configConnection, ocDataConnection, crime.getName());
 
                 // Insert into all_oc2_crimes table
                 insertCrimeData(configConnection, crime, totalItemCost, nonReusableCost, rewardsRange);
@@ -482,11 +482,68 @@ public class GetAllOc2CrimesData {
     }
 
     /**
+     * Get all faction db_suffix values from the config database
+     */
+    private static List<String> getFactionSuffixes(Connection configConnection) {
+        List<String> suffixes = new ArrayList<>();
+
+        String sql = "SELECT DISTINCT " + Constants.COLUMN_NAME_DB_SUFFIX + " " +
+                "FROM " + Constants.TABLE_NAME_FACTIONS + " " +
+                "WHERE oc2_enabled = true";
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
+
+                if (dbSuffix != null && isValidDbSuffix(dbSuffix)) {
+                    suffixes.add(dbSuffix);
+                } else {
+                    logger.warn("Invalid or null db_suffix found: {}", dbSuffix);
+                }
+            }
+
+        } catch (SQLException e) {
+            logger.error("Error fetching faction suffixes from config database", e);
+        }
+
+        logger.debug("Found {} valid faction suffixes for rewards lookup", suffixes.size());
+        return suffixes;
+    }
+
+    /**
+     * Generate SQL query to get all rewards tables dynamically
+     */
+    private static String getAllRewardsTableQuery(Connection configConnection) {
+        List<String> factionSuffixes = getFactionSuffixes(configConnection);
+
+        if (factionSuffixes.isEmpty()) {
+            logger.debug("No faction suffixes found - returning dummy query");
+            return "SELECT NULL as crime_name, NULL as crime_value WHERE 1=0";
+        }
+
+        StringBuilder unionQuery = new StringBuilder();
+
+        for (int i = 0; i < factionSuffixes.size(); i++) {
+            if (i > 0) {
+                unionQuery.append(" UNION ALL ");
+            }
+            unionQuery.append("SELECT crime_name, crime_value FROM r_crimes_")
+                    .append(factionSuffixes.get(i))
+                    .append(" WHERE crime_value IS NOT NULL");
+        }
+
+        logger.debug("Generated rewards table query for {} factions", factionSuffixes.size());
+        return unionQuery.toString();
+    }
+
+    /**
      * Get rewards range for a crime from historical data
      */
-    private static RewardsRange getRewardsRange(Connection ocDataConnection, String crimeName) {
+    private static RewardsRange getRewardsRange(Connection configConnection, Connection ocDataConnection, String crimeName) {
         String sql = "SELECT MIN(crime_value) as min_value, MAX(crime_value) as max_value FROM (" +
-                getAllRewardsTableQuery() + ") AS all_rewards " +
+                getAllRewardsTableQuery(configConnection) + ") AS all_rewards " +
                 "WHERE crime_name = ?";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql)) {
@@ -502,6 +559,7 @@ public class GetAllOc2CrimesData {
                         return new RewardsRange(null, null);
                     }
 
+                    logger.debug("Found rewards range for {}: ${:,} - ${:,}", crimeName, lowValue, highValue);
                     return new RewardsRange(lowValue, highValue);
                 }
             }
@@ -510,36 +568,6 @@ public class GetAllOc2CrimesData {
         }
 
         return new RewardsRange(null, null);
-    }
-
-    /**
-     * Generate SQL query to get all rewards tables
-     */
-    private static String getAllRewardsTableQuery() {
-        // This creates a UNION of all r_crimes_* tables in the database
-        // In practice, you might want to get this list dynamically or maintain it
-        StringBuilder unionQuery = new StringBuilder();
-
-        // Get list of faction suffixes from config database if available
-        // For now, using a placeholder approach - in real implementation,
-        // you'd query the factions table to get all db_suffix values
-        String[] knownSuffixes = {"example1", "example2"}; // Replace with dynamic lookup
-
-        for (int i = 0; i < knownSuffixes.length; i++) {
-            if (i > 0) {
-                unionQuery.append(" UNION ALL ");
-            }
-            unionQuery.append("SELECT crime_name, crime_value FROM r_crimes_")
-                    .append(knownSuffixes[i])
-                    .append(" WHERE crime_value IS NOT NULL");
-        }
-
-        // If no known suffixes, return a dummy query
-        if (knownSuffixes.length == 0) {
-            return "SELECT NULL as crime_name, NULL as crime_value WHERE 1=0";
-        }
-
-        return unionQuery.toString();
     }
 
     /**
@@ -609,5 +637,15 @@ public class GetAllOc2CrimesData {
             pstmt.executeUpdate();
             logger.debug("Inserted slots data for: {} ({} slots)", crime.getName(), crime.getSlots().size());
         }
+    }
+
+    /**
+     * Validate db suffix for SQL injection prevention
+     */
+    private static boolean isValidDbSuffix(String dbSuffix) {
+        return dbSuffix != null &&
+                dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
+                dbSuffix.length() >= 1 &&
+                dbSuffix.length() <= 50;
     }
 }
