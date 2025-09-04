@@ -17,6 +17,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
 
+
+//TODO: This is storing all members not just available members in a_members
 public class GetAvailableMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetAvailableMembers.class);
@@ -246,7 +248,7 @@ public class GetAvailableMembers {
 
             // Handle different response types
             if (response.isSuccess()) {
-                logger.info("✓ Successfully fetched members data for faction {}", factionInfo.getFactionId());
+                logger.info("Successfully fetched members data for faction {}", factionInfo.getFactionId());
                 return processMembersResponse(connection, factionInfo, response.getBody());
 
             } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {

@@ -14,6 +14,9 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
+//TODO: We are still allowing api keys to be validated where the response is incorrect entity id.
+//This needs more testing.
+
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);

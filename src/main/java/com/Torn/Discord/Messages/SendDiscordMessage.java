@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+//TODO: To be tested.
+
 /**
  * Enhanced Discord webhook message sender with database-driven role and webhook support
  */

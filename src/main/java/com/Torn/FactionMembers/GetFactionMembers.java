@@ -7,8 +7,6 @@ import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -132,11 +130,11 @@ public class GetFactionMembers {
                     // Write to database
                     writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
 
-                    logger.info("✓ Successfully processed {} members for faction {}",
+                    logger.info("Successfully processed {} members for faction {}",
                             factionMembers.size(), factionInfo.getFactionId());
                     successfulCount++;
                 } else {
-                    logger.error("✗ Failed to fetch members for faction {} - skipping", factionInfo.getFactionId());
+                    logger.error("Failed to fetch members for faction {} - skipping", factionInfo.getFactionId());
                     failedCount++;
                 }
 
@@ -153,7 +151,7 @@ public class GetFactionMembers {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                logger.error("✗ Error processing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
+                logger.error("Error processing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
                 failedCount++;
                 // Continue with other factions instead of failing completely
             }
@@ -164,7 +162,7 @@ public class GetFactionMembers {
 
         // If more than half failed, this might indicate a systemic issue
         if (failedCount > successfulCount && processedCount > 2) {
-            logger.error("⚠ More than half of factions failed - Torn API may be experiencing issues");
+            logger.error("More than half of factions failed - Torn API may be experiencing issues");
         }
     }
 
@@ -240,7 +238,7 @@ public class GetFactionMembers {
 
         // Handle different response types
         if (response.isSuccess()) {
-            logger.info("✓ Successfully fetched faction members for faction {}", factionInfo.getFactionId());
+            logger.info("Successfully fetched faction members for faction {}", factionInfo.getFactionId());
             return parseFactionMembers(response.getBody(), factionInfo);
 
         } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {

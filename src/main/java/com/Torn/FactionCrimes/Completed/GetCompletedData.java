@@ -27,6 +27,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+
+//TODO: Combine get market item name and price into a single call
 public class GetCompletedData {
 
     private static final Logger logger = LoggerFactory.getLogger(GetCompletedData.class);

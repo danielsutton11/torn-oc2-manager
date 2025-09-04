@@ -41,19 +41,18 @@ public class Execute {
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
-                    break;
+                    break; //TESTING
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");
                     syncFactionMembers();
-                    break;
+                    break; //DONE
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     logger.info("Running overview data update job");
                     // Add your implementation
                     break;
                 case Constants.JOB_UPDATE_COMPLETED_DATA:
                     logger.info("Running completed data update job");
-                    fetchAndProcessAllCompletedCrimes();
-                    // Add your implementation
+                    fetchAndProcessAllCompletedCrimes(); //TESTING
                     break;
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
