@@ -7,6 +7,7 @@ public class Constants {
 
     public static final String JOB_VALIDATE_API_KEYS = "VALIDATE_KEYS";
     public static final String JOB_GET_FACTION_MEMBERS = "FACTION_MEMBERS";
+    public static final String JOB_GET_ALL_OC_CRIMES = "GET_ALL_OC2_CRIMES";
     public static final String JOB_UPDATE_OVERVIEW_DATA = "OVERVIEW_UPDATE";
     public static final String JOB_UPDATE_COMPLETED_DATA = "COMPLETED_CRIMES";
     public static final String JOB_CHECK_USER_ITEMS = "CHECK_ITEMS";

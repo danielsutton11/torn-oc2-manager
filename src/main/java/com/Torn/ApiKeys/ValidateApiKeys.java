@@ -6,6 +6,8 @@ import com.Torn.Helpers.Constants;
 import com.Torn.Execute;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -14,7 +16,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-//TODO: We are still allowing api keys to be validated where the response is incorrect entity id.
+//TODO: TEST THIS BY changing Doc's role to one without faction API access
 //This needs more testing.
 
 public class ValidateApiKeys {
@@ -149,11 +151,14 @@ public class ValidateApiKeys {
         return result;
     }
 
+     /**
+      * Process the API response and categorize the result
+     */
     private static ValidationResult processApiResponse(ApiResponse response, String maskedKey, String factionId) {
         switch (response.getType()) {
             case SUCCESS:
-                logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
-                return ValidationResult.success();
+                // For successful HTTP response, we need to check the JSON body for Torn API errors
+                return processTornApiResponse(response.getBody(), maskedKey, factionId);
 
             case AUTHENTICATION_ERROR:
                 logger.error("API key {} for faction {} is invalid or expired", maskedKey, factionId);
@@ -193,6 +198,121 @@ public class ValidateApiKeys {
                 return ValidationResult.temporaryFailure("Unknown error: " + response.getErrorMessage());
         }
     }
+
+    /**
+     * Process Torn API response body to check for Torn-specific errors
+     */
+    private static ValidationResult processTornApiResponse(String responseBody, String maskedKey, String factionId) {
+        if (responseBody == null || responseBody.trim().isEmpty()) {
+            logger.error("Empty response body for key {} and faction {}", maskedKey, factionId);
+            return ValidationResult.permanentFailure("Empty API response");
+        }
+
+        try {
+            // Parse JSON response
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode rootNode = objectMapper.readTree(responseBody);
+
+            // Check if response contains an error
+            JsonNode errorNode = rootNode.get("error");
+            if (errorNode != null) {
+                return processTornApiError(errorNode, maskedKey, factionId);
+            }
+
+            // If no error node, consider it a successful validation
+            logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
+            return ValidationResult.success();
+
+        } catch (Exception e) {
+            logger.error("Failed to parse API response for key {} and faction {}: {}",
+                    maskedKey, factionId, e.getMessage());
+            return ValidationResult.temporaryFailure("Failed to parse API response: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Process specific Torn API error codes
+     */
+    private static ValidationResult processTornApiError(JsonNode errorNode, String maskedKey, String factionId) {
+        int errorCode = errorNode.get("code").asInt();
+        String errorMessage = errorNode.get("error").asText();
+
+        logger.error("Torn API Error for key {} and faction {}: Code {} - {}",
+                maskedKey, factionId, errorCode, errorMessage);
+
+        switch (errorCode) {
+            case 1: // Key is empty
+            case 2: // Incorrect Key
+            case 12: // Key read error
+                logger.error("API key {} for faction {} is invalid (Code: {})", maskedKey, factionId, errorCode);
+                return ValidationResult.permanentFailure("Invalid API key (Code: " + errorCode + ")");
+
+            case 3: // Wrong type
+            case 4: // Wrong fields
+            case 6: // Incorrect ID
+            case 7: // Incorrect ID-entity relation
+            case 16: // Access level not high enough
+            case 21: // Incorrect category
+            case 22: // Only available in API v1
+            case 23: // Only available in API v2
+                logger.error("API key {} for faction {} has insufficient permissions or wrong configuration (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.permanentFailure("Insufficient permissions or wrong configuration (Code: " + errorCode + ")");
+
+            case 5: // Too many requests
+                logger.warn("Rate limited for key {} and faction {} (Code: {})", maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("Rate limited (Code: " + errorCode + ")");
+
+            case 8: // IP block
+                logger.warn("IP blocked for key {} and faction {} (Code: {})", maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("IP blocked (Code: " + errorCode + ")");
+
+            case 9: // API disabled
+            case 17: // Backend error
+            case 24: // Closed temporarily
+                logger.warn("Torn API temporarily unavailable for key {} and faction {} (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("API temporarily unavailable (Code: " + errorCode + ")");
+
+            case 10: // Key owner in federal jail
+            case 13: // Key disabled due to owner inactivity
+            case 18: // API key paused by owner
+                logger.error("API key {} for faction {} is temporarily disabled (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.permanentFailure("API key temporarily disabled (Code: " + errorCode + ")");
+
+            case 11: // Key change error
+                logger.warn("Key change error for key {} and faction {} (Code: {})", maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("Key change error (Code: " + errorCode + ")");
+
+            case 14: // Daily read limit reached
+                logger.warn("Daily read limit reached for key {} and faction {} (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("Daily read limit reached (Code: " + errorCode + ")");
+
+            case 15: // Temporary error (testing)
+                logger.warn("Temporary test error for key {} and faction {} (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("Temporary test error (Code: " + errorCode + ")");
+
+            case 19: // Must be migrated to crimes 2.0
+                logger.error("API key {} for faction {} needs migration to crimes 2.0 (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.permanentFailure("Needs migration to crimes 2.0 (Code: " + errorCode + ")");
+
+            case 20: // Race not yet finished
+                logger.warn("Race not finished for key {} and faction {} (Code: {})",
+                        maskedKey, factionId, errorCode);
+                return ValidationResult.temporaryFailure("Race not finished (Code: " + errorCode + ")");
+
+            case 0: // Unknown error
+            default:
+                logger.error("Unknown Torn API error for key {} and faction {}: Code {} - {}",
+                        maskedKey, factionId, errorCode, errorMessage);
+                return ValidationResult.temporaryFailure("Unknown API error (Code: " + errorCode + ")");
+        }
+    }
+
 
     private static void updateApiKeyStatusFromResult(String apiKey, String factionId, ValidationResult result, Connection connection) throws SQLException {
         // Only update status for definitive results

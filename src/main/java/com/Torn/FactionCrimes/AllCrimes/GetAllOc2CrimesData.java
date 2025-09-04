@@ -1,31 +1,613 @@
 package com.Torn.FactionCrimes.AllCrimes;
 
-//curl -X 'GET' \
-//        'https://api.torn.com/v2/torn/organizedcrimes' \
-//        -H 'accept: application/json' \
-//        -H 'Authorization: ApiKey 5WjNGvCnRrMnb8BO'
+import com.Torn.Api.ApiResponse;
+import com.Torn.Api.TornApiHandler;
+import com.Torn.Execute;
+import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
+import com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse;
+import com.Torn.Helpers.Constants;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-//All OC2 Crimes//
-//Crime Name
-//Difficulty
-//Scope Cost
-//Scope Return
-//Total Slots
-//Total Item Cost
-//Non-Reusable Cost
-//Rewards Value Low
-//Rewards Value High
-
-
-
-//All OC2 Crimes and Slots //
-// Crime Name
-// Slot 1
-// Slot 2
-// Slot 3
-// Slot 4
-// Slot 5
-// Slot 6
+import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class GetAllOc2CrimesData {
+
+    private static final Logger logger = LoggerFactory.getLogger(GetAllOc2CrimesData.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    // Cache for item market data to avoid repeated API calls
+    private static final ConcurrentHashMap<Long, Item> itemCache = new ConcurrentHashMap<>();
+
+    public static class OC2Crime {
+        private final String name;
+        private final int difficulty;
+        private final int scopeCost;
+        private final int scopeReturn;
+        private final int totalSlots;
+        private final List<OC2Slot> slots;
+
+        public OC2Crime(String name, int difficulty, int scopeCost, int scopeReturn, int totalSlots, List<OC2Slot> slots) {
+            this.name = name;
+            this.difficulty = difficulty;
+            this.scopeCost = scopeCost;
+            this.scopeReturn = scopeReturn;
+            this.totalSlots = totalSlots;
+            this.slots = slots;
+        }
+
+        // Getters
+        public String getName() { return name; }
+        public int getDifficulty() { return difficulty; }
+        public int getScopeCost() { return scopeCost; }
+        public int getScopeReturn() { return scopeReturn; }
+        public int getTotalSlots() { return totalSlots; }
+        public List<OC2Slot> getSlots() { return slots; }
+    }
+
+    public static class OC2Slot {
+        private final String slotId;
+        private final String roleName;
+        private final Long requiredItemId;
+        private final String requiredItemName;
+        private final boolean isReusable;
+        private final Integer averagePrice;
+
+        public OC2Slot(String slotId, String roleName, Long requiredItemId, String requiredItemName, boolean isReusable, Integer averagePrice) {
+            this.slotId = slotId;
+            this.roleName = roleName;
+            this.requiredItemId = requiredItemId;
+            this.requiredItemName = requiredItemName;
+            this.isReusable = isReusable;
+            this.averagePrice = averagePrice;
+        }
+
+        // Getters
+        public String getSlotId() { return slotId; }
+        public String getRoleName() { return roleName; }
+        public Long getRequiredItemId() { return requiredItemId; }
+        public String getRequiredItemName() { return requiredItemName; }
+        public boolean isReusable() { return isReusable; }
+        public Integer getAveragePrice() { return averagePrice; }
+    }
+
+    public static class RewardsRange {
+        private final Long lowValue;
+        private final Long highValue;
+
+        public RewardsRange(Long lowValue, Long highValue) {
+            this.lowValue = lowValue;
+            this.highValue = highValue;
+        }
+
+        public Long getLowValue() { return lowValue; }
+        public Long getHighValue() { return highValue; }
+    }
+
+    /**
+     * Main entry point for fetching and processing all OC2 crimes data
+     */
+    public static void fetchAndProcessAllOC2Crimes() throws SQLException, IOException {
+        logger.info("Starting OC2 crimes data fetch and processing");
+
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
+        }
+
+        String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+        if (ocDataDatabaseUrl == null || ocDataDatabaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL_OC_DATA environment variable not set");
+        }
+
+        logger.info("Connecting to config database...");
+        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
+             Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+
+            logger.info("Database connections established successfully");
+
+            // Check circuit breaker status before starting
+            TornApiHandler.CircuitBreakerStatus cbStatus = TornApiHandler.getCircuitBreakerStatus();
+            logger.info("Circuit breaker status: {}", cbStatus);
+
+            if (cbStatus.isOpen()) {
+                logger.error("Circuit breaker is OPEN - skipping OC2 crimes fetch to prevent further failures");
+                return;
+            }
+
+            // Get admin API key
+            String adminApiKey = getAdminApiKey(configConnection);
+            if (adminApiKey == null) {
+                logger.error("No admin API key found - cannot proceed");
+                return;
+            }
+
+            // Fetch OC2 crimes data from Torn API
+            logger.info("Fetching OC2 crimes data from Torn API...");
+            String crimesJsonResponse = fetchOC2CrimesFromApi(adminApiKey);
+
+            if (crimesJsonResponse == null) {
+                logger.error("Failed to fetch OC2 crimes data from API");
+                return;
+            }
+
+            // Parse and process the response
+            List<OC2Crime> crimes = parseOC2CrimesResponse(crimesJsonResponse, adminApiKey);
+            if (crimes.isEmpty()) {
+                logger.warn("No crimes found in API response");
+                return;
+            }
+
+            logger.info("Successfully parsed {} OC2 crimes", crimes.size());
+
+            // Create tables if they don't exist
+            createOC2CrimesTablesIfNotExists(configConnection);
+
+            // Process crimes and populate tables
+            processCrimesData(configConnection, ocDataConnection, crimes);
+
+            logger.info("OC2 crimes data processing completed successfully");
+
+        } catch (SQLException e) {
+            logger.error("Database error during OC2 crimes processing", e);
+            throw e;
+        } catch (Exception e) {
+            logger.error("Unexpected error during OC2 crimes processing", e);
+            throw e;
+        }
+    }
+
+    /**
+     * Get admin API key from database
+     */
+    private static String getAdminApiKey(Connection connection) throws SQLException {
+        String sql = "SELECT " + Constants.COLUMN_NAME_API_KEY + " FROM " + Constants.TABLE_NAME_API_KEYS +
+                " WHERE admin = true AND " + Constants.COLUMN_NAME_ACTIVE + " = true LIMIT 1";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            if (rs.next()) {
+                String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
+                logger.info("Found admin API key");
+                return apiKey;
+            } else {
+                logger.error("No admin API key found in database");
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Fetch OC2 crimes data from Torn API
+     */
+    private static String fetchOC2CrimesFromApi(String apiKey) {
+        String apiUrl = Constants.API_URL_TORN_BASE_URL + "torn/organizedcrimes?key=" + apiKey;
+
+        logger.debug("Fetching OC2 crimes from: {}", apiUrl.replaceAll("key=[^&]+", "key=***"));
+
+        ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
+
+        if (response.isSuccess()) {
+            logger.info("Successfully fetched OC2 crimes data from API");
+            return response.getBody();
+        } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {
+            logger.error("Circuit breaker is open - cannot fetch OC2 crimes data");
+            return null;
+        } else {
+            logger.error("Failed to fetch OC2 crimes data: {}", response.getErrorMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parse OC2 crimes response from API
+     */
+    private static List<OC2Crime> parseOC2CrimesResponse(String jsonResponse, String apiKey) throws IOException {
+        List<OC2Crime> crimes = new ArrayList<>();
+
+        try {
+            JsonNode rootNode = objectMapper.readTree(jsonResponse);
+            JsonNode organizedCrimesNode = rootNode.get("organizedcrimes");
+
+            if (organizedCrimesNode == null || !organizedCrimesNode.isArray()) {
+                logger.error("Invalid response format - missing or invalid organizedcrimes array");
+                return crimes;
+            }
+
+            for (JsonNode crimeNode : organizedCrimesNode) {
+                try {
+                    OC2Crime crime = parseSingleCrime(crimeNode, apiKey);
+                    if (crime != null) {
+                        crimes.add(crime);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error parsing individual crime: {}", e.getMessage());
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Error parsing OC2 crimes JSON response", e);
+            throw new IOException("Failed to parse OC2 crimes response", e);
+        }
+
+        return crimes;
+    }
+
+    /**
+     * Parse a single crime from JSON
+     */
+    private static OC2Crime parseSingleCrime(JsonNode crimeNode, String apiKey) {
+        try {
+            String name = crimeNode.get("name").asText();
+            int difficulty = crimeNode.get("difficulty").asInt();
+
+            JsonNode scopeNode = crimeNode.get("scope");
+            int scopeCost = scopeNode.get("cost").asInt();
+            int scopeReturn = scopeNode.get("return").asInt();
+
+            JsonNode slotsNode = crimeNode.get("slots");
+            List<OC2Slot> slots = parseCrimeSlots(slotsNode, apiKey);
+
+            int totalSlots = slots.size();
+
+            logger.debug("Parsed crime: {} (difficulty: {}, slots: {})", name, difficulty, totalSlots);
+
+            return new OC2Crime(name, difficulty, scopeCost, scopeReturn, totalSlots, slots);
+
+        } catch (Exception e) {
+            logger.warn("Error parsing crime node: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parse slots for a crime
+     */
+    private static List<OC2Slot> parseCrimeSlots(JsonNode slotsNode, String apiKey) {
+        List<OC2Slot> slots = new ArrayList<>();
+
+        if (slotsNode == null || !slotsNode.isArray()) {
+            return slots;
+        }
+
+        // Group slots by position name to handle duplicates with #1, #2 logic
+        Map<String, List<JsonNode>> groupedSlots = new HashMap<>();
+
+        for (JsonNode slotNode : slotsNode) {
+            String slotId = slotNode.get("id").asText();
+            String position = slotNode.get("name").asText();
+
+            groupedSlots.computeIfAbsent(position, k -> new ArrayList<>()).add(slotNode);
+        }
+
+        // Process grouped slots with numbering logic
+        for (Map.Entry<String, List<JsonNode>> entry : groupedSlots.entrySet()) {
+            String basePosition = entry.getKey();
+            List<JsonNode> group = entry.getValue();
+
+            // Sort by slot ID for consistent ordering
+            group.sort((a, b) -> a.get("id").asText().compareTo(b.get("id").asText()));
+
+            for (int i = 0; i < group.size(); i++) {
+                JsonNode slotNode = group.get(i);
+                String slotId = slotNode.get("id").asText();
+
+                // Apply naming logic: single slot keeps original name, multiple get #1, #2, etc.
+                String roleName = group.size() > 1 ? basePosition + " #" + (i + 1) : basePosition;
+
+                // Parse required item
+                Long requiredItemId = null;
+                String requiredItemName = null;
+                boolean isReusable = true;
+                Integer averagePrice = null;
+
+                JsonNode requiredItemNode = slotNode.get("required_item");
+                if (requiredItemNode != null && !requiredItemNode.isNull()) {
+                    requiredItemId = requiredItemNode.get("id").asLong();
+                    isReusable = !requiredItemNode.get("is_used").asBoolean();
+
+                    // Fetch item details from market
+                    Item itemDetails = fetchItemMarketSafe(requiredItemId, apiKey);
+                    if (itemDetails != null) {
+                        requiredItemName = itemDetails.getName();
+                        averagePrice = itemDetails.getAveragePrice();
+                    }
+                }
+
+                slots.add(new OC2Slot(slotId, roleName, requiredItemId, requiredItemName, isReusable, averagePrice));
+            }
+        }
+
+        return slots;
+    }
+
+    /**
+     * Fetch item market data with caching and error handling
+     */
+    private static Item fetchItemMarketSafe(Long itemId, String apiKey) {
+        if (itemId == null) return null;
+
+        // Check cache first
+        Item cachedItem = itemCache.get(itemId);
+        if (cachedItem != null) {
+            return cachedItem;
+        }
+
+        try {
+            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN + "&key=" + apiKey;
+
+            ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
+
+            if (response.isSuccess()) {
+                ItemMarketResponse marketResponse = objectMapper.readValue(response.getBody(), ItemMarketResponse.class);
+                if (marketResponse != null && marketResponse.getItemMarket() != null) {
+                    Item item = marketResponse.getItemMarket();
+                    itemCache.put(itemId, item);
+                    return item;
+                }
+            } else {
+                logger.debug("Failed to fetch item market data for item {}: {}", itemId, response.getErrorMessage());
+            }
+
+        } catch (Exception e) {
+            logger.debug("Error fetching market data for item {}: {}", itemId, e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * Create the two OC2 crimes tables if they don't exist
+     */
+    private static void createOC2CrimesTablesIfNotExists(Connection connection) throws SQLException {
+        // Create all_oc2_crimes table
+        String createCrimesTableSql = "CREATE TABLE IF NOT EXISTS all_oc2_crimes (" +
+                "crime_name VARCHAR(255) PRIMARY KEY," +
+                "difficulty INTEGER NOT NULL," +
+                "scope_cost INTEGER NOT NULL," +
+                "scope_return INTEGER NOT NULL," +
+                "total_slots INTEGER NOT NULL," +
+                "total_item_cost BIGINT," +
+                "non_reusable_cost BIGINT," +
+                "rewards_value_low BIGINT," +
+                "rewards_value_high BIGINT," +
+                "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                ")";
+
+        // Create all_oc2_crimes_slots table
+        String createSlotsTableSql = "CREATE TABLE IF NOT EXISTS all_oc2_crimes_slots (" +
+                "crime_name VARCHAR(255) NOT NULL," +
+                "slot_1 VARCHAR(100)," +
+                "slot_2 VARCHAR(100)," +
+                "slot_3 VARCHAR(100)," +
+                "slot_4 VARCHAR(100)," +
+                "slot_5 VARCHAR(100)," +
+                "slot_6 VARCHAR(100)," +
+                "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "PRIMARY KEY (crime_name)" +
+                ")";
+
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute(createCrimesTableSql);
+            stmt.execute(createSlotsTableSql);
+
+            // Create indexes for better performance
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_all_oc2_crimes_difficulty ON all_oc2_crimes(difficulty)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_all_oc2_crimes_scope_cost ON all_oc2_crimes(scope_cost)");
+
+            logger.info("OC2 crimes tables created or verified successfully");
+        }
+    }
+
+    /**
+     * Process crimes data and populate both tables
+     */
+    private static void processCrimesData(Connection configConnection, Connection ocDataConnection, List<OC2Crime> crimes) throws SQLException {
+        logger.info("Processing {} crimes for database insertion", crimes.size());
+
+        // Clear existing data and insert new data in transaction
+        configConnection.setAutoCommit(false);
+        try {
+            clearExistingOC2Data(configConnection);
+
+            for (OC2Crime crime : crimes) {
+                // Calculate costs
+                long totalItemCost = calculateTotalItemCost(crime.getSlots());
+                long nonReusableCost = calculateNonReusableCost(crime.getSlots());
+
+                // Get rewards range from OC data database
+                RewardsRange rewardsRange = getRewardsRange(ocDataConnection, crime.getName());
+
+                // Insert into all_oc2_crimes table
+                insertCrimeData(configConnection, crime, totalItemCost, nonReusableCost, rewardsRange);
+
+                // Insert into all_oc2_crimes_slots table
+                insertCrimeSlotsData(configConnection, crime);
+            }
+
+            configConnection.commit();
+            logger.info("Successfully processed and stored {} crimes data", crimes.size());
+
+        } catch (SQLException e) {
+            configConnection.rollback();
+            logger.error("Failed to process crimes data, rolling back", e);
+            throw e;
+        } finally {
+            configConnection.setAutoCommit(true);
+        }
+    }
+
+    /**
+     * Clear existing OC2 data from both tables
+     */
+    private static void clearExistingOC2Data(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("DELETE FROM all_oc2_crimes");
+            stmt.executeUpdate("DELETE FROM all_oc2_crimes_slots");
+            logger.debug("Cleared existing OC2 data from both tables");
+        }
+    }
+
+    /**
+     * Calculate total item cost for a crime
+     */
+    private static long calculateTotalItemCost(List<OC2Slot> slots) {
+        return slots.stream()
+                .filter(slot -> slot.getAveragePrice() != null)
+                .mapToLong(slot -> slot.getAveragePrice().longValue())
+                .sum();
+    }
+
+    /**
+     * Calculate non-reusable item cost for a crime
+     */
+    private static long calculateNonReusableCost(List<OC2Slot> slots) {
+        long totalCost = calculateTotalItemCost(slots);
+        long reusableCost = slots.stream()
+                .filter(slot -> slot.isReusable() && slot.getAveragePrice() != null)
+                .mapToLong(slot -> slot.getAveragePrice().longValue())
+                .sum();
+
+        return totalCost - reusableCost;
+    }
+
+    /**
+     * Get rewards range for a crime from historical data
+     */
+    private static RewardsRange getRewardsRange(Connection ocDataConnection, String crimeName) {
+        String sql = "SELECT MIN(crime_value) as min_value, MAX(crime_value) as max_value FROM (" +
+                getAllRewardsTableQuery() + ") AS all_rewards " +
+                "WHERE crime_name = ?";
+
+        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql)) {
+            pstmt.setString(1, crimeName);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    Long lowValue = rs.getLong("min_value");
+                    Long highValue = rs.getLong("max_value");
+
+                    // Handle case where no data found (nulls)
+                    if (rs.wasNull()) {
+                        return new RewardsRange(null, null);
+                    }
+
+                    return new RewardsRange(lowValue, highValue);
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("Could not fetch rewards range for crime {}: {}", crimeName, e.getMessage());
+        }
+
+        return new RewardsRange(null, null);
+    }
+
+    /**
+     * Generate SQL query to get all rewards tables
+     */
+    private static String getAllRewardsTableQuery() {
+        // This creates a UNION of all r_crimes_* tables in the database
+        // In practice, you might want to get this list dynamically or maintain it
+        StringBuilder unionQuery = new StringBuilder();
+
+        // Get list of faction suffixes from config database if available
+        // For now, using a placeholder approach - in real implementation,
+        // you'd query the factions table to get all db_suffix values
+        String[] knownSuffixes = {"example1", "example2"}; // Replace with dynamic lookup
+
+        for (int i = 0; i < knownSuffixes.length; i++) {
+            if (i > 0) {
+                unionQuery.append(" UNION ALL ");
+            }
+            unionQuery.append("SELECT crime_name, crime_value FROM r_crimes_")
+                    .append(knownSuffixes[i])
+                    .append(" WHERE crime_value IS NOT NULL");
+        }
+
+        // If no known suffixes, return a dummy query
+        if (knownSuffixes.length == 0) {
+            return "SELECT NULL as crime_name, NULL as crime_value WHERE 1=0";
+        }
+
+        return unionQuery.toString();
+    }
+
+    /**
+     * Insert crime data into all_oc2_crimes table
+     */
+    private static void insertCrimeData(Connection connection, OC2Crime crime, long totalItemCost,
+                                        long nonReusableCost, RewardsRange rewardsRange) throws SQLException {
+        String sql = "INSERT INTO all_oc2_crimes (" +
+                "crime_name, difficulty, scope_cost, scope_return, total_slots, " +
+                "total_item_cost, non_reusable_cost, rewards_value_low, rewards_value_high, " +
+                "last_updated) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, crime.getName());
+            pstmt.setInt(2, crime.getDifficulty());
+            pstmt.setInt(3, crime.getScopeCost());
+            pstmt.setInt(4, crime.getScopeReturn());
+            pstmt.setInt(5, crime.getTotalSlots());
+            pstmt.setLong(6, totalItemCost);
+            pstmt.setLong(7, nonReusableCost);
+
+            if (rewardsRange.getLowValue() != null) {
+                pstmt.setLong(8, rewardsRange.getLowValue());
+            } else {
+                pstmt.setNull(8, java.sql.Types.BIGINT);
+            }
+
+            if (rewardsRange.getHighValue() != null) {
+                pstmt.setLong(9, rewardsRange.getHighValue());
+            } else {
+                pstmt.setNull(9, java.sql.Types.BIGINT);
+            }
+
+            pstmt.executeUpdate();
+            logger.debug("Inserted crime data for: {}", crime.getName());
+        }
+    }
+
+    /**
+     * Insert crime slots data into all_oc2_crimes_slots table
+     */
+    private static void insertCrimeSlotsData(Connection connection, OC2Crime crime) throws SQLException {
+        String sql = "INSERT INTO all_oc2_crimes_slots (" +
+                "crime_name, slot_1, slot_2, slot_3, slot_4, slot_5, slot_6, last_updated) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, crime.getName());
+
+            // Warn if crime has more than 6 slots
+            if (crime.getSlots().size() > 6) {
+                logger.warn("⚠ ATTENTION: Crime '{}' has {} slots but database only supports 6! " +
+                                "Slots 7+ will be lost. Consider updating schema.",
+                        crime.getName(), crime.getSlots().size());
+            }
+
+            // Set slots 1-6 (null if not present)
+            for (int i = 1; i <= 6; i++) {
+                if (i <= crime.getSlots().size()) {
+                    pstmt.setString(i + 1, crime.getSlots().get(i - 1).getRoleName());
+                } else {
+                    pstmt.setNull(i + 1, java.sql.Types.VARCHAR);
+                }
+            }
+
+            pstmt.executeUpdate();
+            logger.debug("Inserted slots data for: {} ({} slots)", crime.getName(), crime.getSlots().size());
+        }
+    }
 }

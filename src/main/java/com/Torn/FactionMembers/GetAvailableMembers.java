@@ -18,7 +18,7 @@ import java.sql.Statement;
 import java.util.*;
 
 
-//TODO: This is storing all members not just available members in a_members
+//TODO: This is storing all members not just available members in a_members - TEST THIS
 public class GetAvailableMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetAvailableMembers.class);
@@ -313,8 +313,7 @@ public class GetAvailableMembers {
                 return MembersProcessingResult.success(0, 0);
             }
 
-            // Count available members (not in OC)
-            int availableCount = (int) members.stream().filter(m -> !m.isInOC()).count();
+            int availableCount = members.size();
 
             // Store members in database
             connection.setAutoCommit(false);
@@ -346,10 +345,12 @@ public class GetAvailableMembers {
     }
 
     /**
-     * Parse members from JSON response
+     * Parse members from JSON response and filter for available members only
      */
     private static List<AvailableMember> parseMembersFromResponse(JsonNode membersNode, FactionInfo factionInfo) {
-        List<AvailableMember> members = new ArrayList<>();
+        List<AvailableMember> availableMembers = new ArrayList<>();
+        int totalMembers = 0;
+        int membersInOC = 0;
 
         for (JsonNode memberNode : membersNode) {
             try {
@@ -361,6 +362,8 @@ public class GetAvailableMembers {
                 JsonNode lastActionNode = memberNode.get("last_action");
 
                 if (idNode != null && nameNode != null && isInOcNode != null) {
+                    totalMembers++;
+
                     String userId = idNode.asText();
                     String username = nameNode.asText();
                     boolean isInOC = isInOcNode.asBoolean();
@@ -368,7 +371,13 @@ public class GetAvailableMembers {
                     Integer level = levelNode != null ? levelNode.asInt() : null;
                     String lastAction = lastActionNode != null ? lastActionNode.asText() : null;
 
-                    members.add(new AvailableMember(userId, username, isInOC, status, level, lastAction));
+                    if (isInOC) {
+                        membersInOC++;
+                        logger.debug("Skipping member {} - already in OC", username);
+                    } else {
+                        // Only add members who are NOT in OC (available for OC)
+                        availableMembers.add(new AvailableMember(userId, username, isInOC, status, level, lastAction));
+                    }
                 } else {
                     logger.warn("Missing required fields (id, name, or is_in_oc) in member data for faction {}",
                             factionInfo.getFactionId());
@@ -378,8 +387,9 @@ public class GetAvailableMembers {
             }
         }
 
-        logger.info("Parsed {} members for faction {}", members.size(), factionInfo.getFactionId());
-        return members;
+        logger.info("Processed {} total members for faction {}: {} available for OC, {} already in OC",
+                totalMembers, factionInfo.getFactionId(), availableMembers.size(), membersInOC);
+        return availableMembers;
     }
 
     /**

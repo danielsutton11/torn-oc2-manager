@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
+import static com.Torn.FactionCrimes.AllCrimes.GetAllOc2CrimesData.fetchAndProcessAllOC2Crimes;
 import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProcessAllAvailableCrimes;
 import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
@@ -41,6 +42,10 @@ public class Execute {
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
+                    break; //TESTING
+                case Constants.JOB_GET_ALL_OC_CRIMES:
+                    logger.info("Running Get All OC Data job");
+                    fetchAndProcessAllOC2Crimes();
                     break; //TESTING
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");

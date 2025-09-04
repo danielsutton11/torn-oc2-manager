@@ -7,12 +7,14 @@ import com.Torn.FactionCrimes.Models.CrimesModel.Crime;
 import com.Torn.FactionCrimes.Models.CrimesModel.CrimesResponse;
 import com.Torn.FactionCrimes.Models.CrimesModel.Slot;
 import com.Torn.FactionCrimes.Models.CrimesModel.SlotUser;
+import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
 import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -28,7 +30,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 
-//TODO: Combine get market item name and price into a single call
+//TODO: Combine get market item name and price into a single call - TEST THIS
 public class GetCompletedData {
 
     private static final Logger logger = LoggerFactory.getLogger(GetCompletedData.class);
@@ -535,7 +537,7 @@ public class GetCompletedData {
             Number respectReward = (Number) rewards.get("respect");
             int respect = (respectReward != null) ? respectReward.intValue() : 0;
 
-            // Process items
+            // Process items with single API call per item
             String itemsString = "";
             Long itemQuantity = null;
             long crimeValue = money; // Start with money value
@@ -555,16 +557,15 @@ public class GetCompletedData {
                         Long itemId = itemIdNum.longValue();
                         int quantity = quantityNum.intValue();
 
-                        // Get item name and price from market data using the faction's API key
-                        String itemName = getItemNameFromMarket(itemId, apiKey);
-                        Integer itemPrice = getItemPriceFromMarket(itemId, apiKey);
+                        // Get both item name and price from single market data call
+                        ItemMarketData itemData = getItemMarketData(itemId, apiKey);
 
-                        if (itemName != null) {
+                        if (itemData != null && itemData.getName() != null) {
                             if (i > 0) itemsBuilder.append(", ");
-                            itemsBuilder.append(itemName);
+                            itemsBuilder.append(itemData.getName());
 
-                            if (itemPrice != null) {
-                                totalItemValue += (long) itemPrice * quantity;
+                            if (itemData.getAveragePrice() != null) {
+                                totalItemValue += (long) itemData.getAveragePrice() * quantity;
                             }
 
                             // If there's only one item type, store its quantity
@@ -614,6 +615,76 @@ public class GetCompletedData {
         }
     }
 
+    /**
+     * Data holder for item market information
+     */
+    private static class ItemMarketData {
+        private final String name;
+        private final Integer averagePrice;
+
+        public ItemMarketData(String name, Integer averagePrice) {
+            this.name = name;
+            this.averagePrice = averagePrice;
+        }
+
+        public String getName() { return name; }
+        public Integer getAveragePrice() { return averagePrice; }
+    }
+
+    // Cache for item market data to avoid repeated API calls within the same run
+    private static final ConcurrentHashMap<Long, ItemMarketData> itemMarketCache = new ConcurrentHashMap<>();
+
+    /**
+     * Get both item name and price from market data using a single API call
+     */
+    private static ItemMarketData getItemMarketData(Long itemId, String apiKey) {
+        if (itemId == null) {
+            return null;
+        }
+
+        // Check cache first
+        ItemMarketData cachedData = itemMarketCache.get(itemId);
+        if (cachedData != null) {
+            return cachedData;
+        }
+
+        try {
+            if (apiKey == null) {
+                logger.debug("No API key provided for item market lookup");
+                return null;
+            }
+
+            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN + "&key=" + apiKey;
+            ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
+
+            if (response.isSuccess()) {
+                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse marketResponse =
+                        objectMapper.readValue(response.getBody(),
+                                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse.class);
+
+                if (marketResponse != null && marketResponse.getItemMarket() != null) {
+                    Item item = marketResponse.getItemMarket();
+                    ItemMarketData itemData = new ItemMarketData(item.getName(), item.getAveragePrice());
+
+                    // Cache the result
+                    itemMarketCache.put(itemId, itemData);
+
+                    logger.debug("Fetched and cached item data for ID {}: {} (${:,})",
+                            itemId, itemData.getName(), itemData.getAveragePrice());
+
+                    return itemData;
+                }
+            } else {
+                logger.debug("Failed to fetch item market data for ID {}: {}", itemId, response.getErrorMessage());
+            }
+        } catch (Exception e) {
+            logger.debug("Could not fetch item market data for ID {}: {}", itemId, e.getMessage());
+        }
+
+        // Cache null result to avoid repeated failed calls
+        itemMarketCache.put(itemId, new ItemMarketData(null, null));
+        return null;
+    }
 
     /**
      * Calculate total success value from all slots using checkpoint_pass_rate
@@ -635,62 +706,6 @@ public class GetCompletedData {
         }
 
         return totalPassRate;
-    }
-
-    /**
-     * Get item name from market data using the provided API key
-     */
-    private static String getItemNameFromMarket(Long itemId, String apiKey) {
-        try {
-            if (apiKey == null) {
-                logger.debug("No API key provided for item market lookup");
-                return null;
-            }
-
-            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN;
-            ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
-
-            if (response.isSuccess()) {
-                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse marketResponse =
-                        objectMapper.readValue(response.getBody(),
-                                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse.class);
-
-                if (marketResponse != null && marketResponse.getItemMarket() != null) {
-                    return marketResponse.getItemMarket().getName();
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Could not fetch item name for ID {}: {}", itemId, e.getMessage());
-        }
-        return null;
-    }
-
-    /**
-     * Get item price from market data using the provided API key
-     */
-    private static Integer getItemPriceFromMarket(Long itemId, String apiKey) {
-        try {
-            if (apiKey == null) {
-                logger.debug("No API key provided for item market lookup");
-                return null;
-            }
-
-            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN;
-            ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
-
-            if (response.isSuccess()) {
-                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse marketResponse =
-                        objectMapper.readValue(response.getBody(),
-                                com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse.class);
-
-                if (marketResponse != null && marketResponse.getItemMarket() != null) {
-                    return marketResponse.getItemMarket().getAveragePrice();
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Could not fetch item price for ID {}: {}", itemId, e.getMessage());
-        }
-        return null;
     }
 
     /**
