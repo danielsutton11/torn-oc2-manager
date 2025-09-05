@@ -529,6 +529,7 @@ public class GetAllOc2CrimesData {
             if (i > 0) {
                 unionQuery.append(" UNION ALL ");
             }
+
             unionQuery.append("SELECT crime_name, crime_value FROM r_crimes_")
                     .append(factionSuffixes.get(i))
                     .append(" WHERE crime_value IS NOT NULL");

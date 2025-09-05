@@ -2,9 +2,7 @@ package com.Torn.Helpers;
 
 public class Constants {
 
-
     //RAILWAY VARIABLE NAMES
-
     public static final String JOB_VALIDATE_API_KEYS = "VALIDATE_KEYS";
     public static final String JOB_GET_FACTION_MEMBERS = "FACTION_MEMBERS";
     public static final String JOB_GET_ALL_OC_CRIMES = "GET_ALL_OC2_CRIMES";
@@ -14,6 +12,7 @@ public class Constants {
     public static final String JOB_CHECK_AVAILABLE_CRIMES_MEMBERS = "AVAILABLE_CRIMES_MEMBERS";
     public static final String JOB_UPDATE_CRIMES_PAID_DATA = "CRIMES_PAID";
 
+    // FIXED: Use consistent naming for all environment variables
     public static final String OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP = "OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP";
     public static final String OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES = "OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES";
     public static final String OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP = "OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP";
@@ -21,7 +20,6 @@ public class Constants {
 
     public static final String DATABASE_URL_CONFIG = "DATABASE_URL_CONFIG";
     public static final String DATABASE_URL_OC_DATA = "DATABASE_URL_OC_DATA";
-
 
     //POSTGRES
     public static final String POSTGRES_URL = "postgresql://";
@@ -46,19 +44,16 @@ public class Constants {
     public static final String COLUMN_NAME_CRIME_NAME = "crime_name";
     public static final String COLUMN_NAME_CRIME_VALUE = "crime_value";
 
-
     public static final String TABLE_NAME_FACTION_MEMBERS = "members_";
     public static final String TABLE_NAME_AVAILABLE_MEMBERS = "a_members_";
     public static final String TABLE_NAME_COMPLETED_CRIMES = "c_crimes_";
     public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
-
 
     //CRIME STATUSES
     public static final String AVAILABLE = "available";
     public static final String PLANNING = "planning";
     public static final String RECRUITING = "recruiting";
     public static final String COMPLETED = "completed";
-
 
     //TORN API ENDPOINTS & Parameters
     public static final String API_URL_TORN_PARAMETER_JOIN_QUERY = "?";
@@ -83,7 +78,6 @@ public class Constants {
     public static final String API_URL_TORN = API_URL_TORN_BASE_URL +  "/torn";
     public static final String API_URL_TORN_ORGANISED_CRIMES = API_URL_TORN + "/organizedcrimes";
 
-
     public static final String API_URL_AVAILABLE_FACTION_CRIMES = API_URL_FACTION_CRIMES +
             API_URL_TORN_PARAMETER_JOIN_QUERY + API_URL_TORN_PARAMETER_CAT + AVAILABLE +
             API_URL_TORN_PARAMETER_JOIN_AND + API_URL_TORN_PARAMETER_SORT + API_URL_TORN_PARAMETER_DESC;
@@ -91,9 +85,6 @@ public class Constants {
     public static final String API_URL_COMPLETED_FACTION_CRIMES = API_URL_FACTION_CRIMES +
             API_URL_TORN_PARAMETER_JOIN_QUERY + API_URL_TORN_PARAMETER_CAT + COMPLETED +
             API_URL_TORN_PARAMETER_JOIN_AND + API_URL_TORN_PARAMETER_OFFSET;
-
-
-
 
     //TORN API HEADER PARAMETERS
     public static final String HEADER_ACCEPT = "accept";
@@ -125,15 +116,10 @@ public class Constants {
     public static final String NODE_LEVEL = "level";
     public static final String NODE_lAST_ACTION = "last_action";
 
-
-
     //DISCORD
     public static final String DISCORD_BOT_TOKEN = "DISCORD_BOT_TOKEN";
     public static final String DISCORD_GUILD_ID = "DISCORD_GUILD_ID";
 
-
     //OTHER STATICS
     public static final String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss";
-
-
 }

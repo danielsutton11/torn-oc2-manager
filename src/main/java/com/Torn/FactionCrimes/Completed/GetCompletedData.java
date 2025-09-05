@@ -326,7 +326,7 @@ public class GetCompletedData {
     }
 
     /**
-     * Get timestamp configuration based on environment variables or defaults
+     * Get timestamp configuration based on environment variables and database state
      */
     private static TimestampConfig getTimestampConfig(Connection connection, String tableName) throws SQLException {
         // Check for environment variable overrides first
@@ -338,14 +338,13 @@ public class GetCompletedData {
                         fromTimestamp, formatTimestamp(fromTimestamp));
                 return new TimestampConfig(false, fromTimestamp);
             } catch (NumberFormatException e) {
-                logger.error("Invalid COMPLETED_CRIMES_FROM_TIMESTAMP format: {}, ignoring", overrideFromTimestamp);
+                logger.error("Invalid OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP format: {}, ignoring", overrideFromTimestamp);
             }
         }
 
         // Check for custom look back period for incremental updates
         int incrementalMinutes = getEnvironmentInt(Constants.OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES, DEFAULT_INCREMENTAL_MINUTES);
         if(incrementalMinutes == 0) {incrementalMinutes = DEFAULT_INCREMENTAL_MINUTES;}
-
 
         // Check if table exists and has recent data
         String countSql = "SELECT COUNT(*) as row_count, MAX(last_updated) as last_update FROM " + tableName;
@@ -363,9 +362,9 @@ public class GetCompletedData {
                     return new TimestampConfig(true, null);
                 }
 
-                // Check if last update was more than incrementalMinutes ago
-                Instant lastUpdateInstant = lastUpdate.toInstant();
+                // FIXED: Calculate cutoff time ONCE and reuse it for consistency
                 Instant cutoffTime = Instant.now().minusSeconds(incrementalMinutes * 60L);
+                Instant lastUpdateInstant = lastUpdate.toInstant();
 
                 if (lastUpdateInstant.isBefore(cutoffTime)) {
                     // Been too long, do initial sync
@@ -373,8 +372,8 @@ public class GetCompletedData {
                             tableName, lastUpdate, incrementalMinutes);
                     return new TimestampConfig(true, null);
                 } else {
-                    // Recent data, do incremental update
-                    long fromTimestamp = Instant.now().minusSeconds(incrementalMinutes * 60L).getEpochSecond();
+                    // Recent data, do incremental update - use the SAME cutoffTime for consistency
+                    long fromTimestamp = cutoffTime.getEpochSecond();
                     logger.info("Table {} was recently updated at {} - performing incremental sync from {} minutes ago (timestamp: {})",
                             tableName, lastUpdate, incrementalMinutes, fromTimestamp);
                     return new TimestampConfig(false, fromTimestamp);
@@ -389,7 +388,6 @@ public class GetCompletedData {
         // Fallback
         return new TimestampConfig(true, null);
     }
-
     /**
      * Helper to get integer from environment with default fallback
      */

@@ -38,35 +38,43 @@ public class ApiResponse {
 
     // Factory methods for different response types
     public static ApiResponse success(String body) {
+        // Allow null body for successful responses with no content
         return new ApiResponse(ResponseType.SUCCESS, true, false, body, null);
     }
 
     public static ApiResponse authenticationError(String message) {
-        return new ApiResponse(ResponseType.AUTHENTICATION_ERROR, false, false, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Authentication failed";
+        return new ApiResponse(ResponseType.AUTHENTICATION_ERROR, false, false, null, errorMsg);
     }
 
     public static ApiResponse authorizationError(String message) {
-        return new ApiResponse(ResponseType.AUTHORIZATION_ERROR, false, false, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Authorization failed";
+        return new ApiResponse(ResponseType.AUTHORIZATION_ERROR, false, false, null, errorMsg);
     }
 
     public static ApiResponse notFound(String message) {
-        return new ApiResponse(ResponseType.NOT_FOUND, false, false, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Resource not found";
+        return new ApiResponse(ResponseType.NOT_FOUND, false, false, null, errorMsg);
     }
 
     public static ApiResponse rateLimited(String message) {
-        return new ApiResponse(ResponseType.RATE_LIMITED, false, true, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Rate limit exceeded";
+        return new ApiResponse(ResponseType.RATE_LIMITED, false, true, null, errorMsg);
     }
 
     public static ApiResponse clientError(String message) {
-        return new ApiResponse(ResponseType.CLIENT_ERROR, false, false, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Client error occurred";
+        return new ApiResponse(ResponseType.CLIENT_ERROR, false, false, null, errorMsg);
     }
 
     public static ApiResponse serverError(String message) {
-        return new ApiResponse(ResponseType.SERVER_ERROR, false, true, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Server error occurred";
+        return new ApiResponse(ResponseType.SERVER_ERROR, false, true, null, errorMsg);
     }
 
     public static ApiResponse networkError(String message) {
-        return new ApiResponse(ResponseType.NETWORK_ERROR, false, true, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Network error occurred";
+        return new ApiResponse(ResponseType.NETWORK_ERROR, false, true, null, errorMsg);
     }
 
     public static ApiResponse circuitBreakerOpen() {
@@ -85,11 +93,13 @@ public class ApiResponse {
     }
 
     public static ApiResponse unexpectedError(String message) {
-        return new ApiResponse(ResponseType.UNEXPECTED_ERROR, false, true, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Unexpected error occurred";
+        return new ApiResponse(ResponseType.UNEXPECTED_ERROR, false, true, null, errorMsg);
     }
 
     public static ApiResponse unknownError(String message) {
-        return new ApiResponse(ResponseType.UNKNOWN_ERROR, false, true, null, message);
+        String errorMsg = (message != null && !message.trim().isEmpty()) ? message : "Unknown error occurred";
+        return new ApiResponse(ResponseType.UNKNOWN_ERROR, false, true, null, errorMsg);
     }
 
     // Getters

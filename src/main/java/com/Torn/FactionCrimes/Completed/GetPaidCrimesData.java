@@ -267,7 +267,7 @@ public class GetPaidCrimesData {
     }
 
     /**
-     * FIXED: Get timestamp for payout data filtering based on environment variables and database state
+     * Get timestamp for payout data filtering based on environment variables and database state
      */
     private static PayoutTimestampConfig getPayoutTimestampConfig(Connection connection, String rewardsTableName) {
         // Check for environment variable override first
@@ -279,7 +279,7 @@ public class GetPaidCrimesData {
                         fromTimestamp, formatTimestamp(fromTimestamp));
                 return new PayoutTimestampConfig(false, fromTimestamp);
             } catch (NumberFormatException e) {
-                logger.error("Invalid PAYOUT_CRIMES_FROM_TIMESTAMP format: {}, using default", overrideFromTimestamp);
+                logger.error("Invalid OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP format: {}, using default", overrideFromTimestamp);
             }
         }
 
@@ -303,8 +303,10 @@ public class GetPaidCrimesData {
         int lookbackHours = getEnvironmentInt(Constants.OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS, DEFAULT_PAYOUT_LOOKBACK_HOURS);
         if(lookbackHours == 0) {lookbackHours = DEFAULT_PAYOUT_LOOKBACK_HOURS;}
 
-        // For regular runs, use incremental approach with timestamp
-        long fromTimestamp = Instant.now().minusSeconds(lookbackHours * 3600L).getEpochSecond();
+        // FIXED: Calculate cutoff time ONCE and use it consistently
+        Instant cutoffTime = Instant.now().minusSeconds(lookbackHours * 3600L);
+        long fromTimestamp = cutoffTime.getEpochSecond();
+
         logger.info("Using calculated payout FROM timestamp: {} ({} hours ago)",
                 fromTimestamp, lookbackHours);
         return new PayoutTimestampConfig(false, fromTimestamp);
