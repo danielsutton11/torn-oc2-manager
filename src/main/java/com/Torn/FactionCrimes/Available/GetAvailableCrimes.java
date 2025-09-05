@@ -216,7 +216,7 @@ public class GetAvailableCrimes {
     private static CrimesProcessingResult fetchAndStoreCrimesForFaction(Connection connection, FactionInfo factionInfo) {
         try {
             // Construct API URL for this faction's crimes
-            String apiUrl = Constants.API_URL_AVAILABLE_FACTION_CRIMES + "&key=" + factionInfo.getApiKey();
+            String apiUrl = Constants.API_URL_AVAILABLE_FACTION_CRIMES;
 
             logger.debug("Fetching crimes for faction: {}", factionInfo.getFactionId());
 
@@ -442,7 +442,13 @@ public class GetAvailableCrimes {
                     stmt.setObject(12, itemId);
 
                     // Get item market data (cached)
-                    Item itemMarket = itemCache.computeIfAbsent(itemId, GetAvailableCrimes::fetchItemMarketSafe);
+                    Item itemMarket = itemCache.get(itemId);
+                    if (itemMarket == null) {
+                        itemMarket = fetchItemMarketSafe(itemId, factionInfo);
+                        if (itemMarket != null) {
+                            itemCache.put(itemId, itemMarket);
+                        }
+                    }
                     if (itemMarket != null) {
                         stmt.setString(13, itemMarket.getName());
                         stmt.setObject(14, itemMarket.getAveragePrice());
@@ -468,29 +474,16 @@ public class GetAvailableCrimes {
         }
     }
 
-    //TODO: Need to fix this
-
     /**
      * Fetch item market data with error handling
      */
-    private static Item fetchItemMarketSafe(Long itemId) {
+    private static Item fetchItemMarketSafe(Long itemId, FactionInfo factionInfo) {
         try {
             if (itemId == null) return null;
 
-            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN;
+            String itemUrl = Constants.API_URL_MARKET + itemId + Constants.API_URL_ITEM_MARKET;
 
-            // Use a test API key for item market data (items don't require faction-specific keys)
-            String testApiKey = System.getenv("HEALTH_CHECK_API_KEY");
-            if (testApiKey == null) {
-                testApiKey = System.getenv("TORN_LIMITED_API_KEY");
-            }
-
-            if (testApiKey == null) {
-                logger.warn("No API key available for item market data - skipping item {}", itemId);
-                return null;
-            }
-
-            ApiResponse response = TornApiHandler.executeRequest(itemUrl, testApiKey);
+            ApiResponse response = TornApiHandler.executeRequest(itemUrl, factionInfo.getApiKey());
 
             if (response.isSuccess()) {
                 ItemMarketResponse marketResponse = objectMapper.readValue(response.getBody(), ItemMarketResponse.class);
@@ -510,7 +503,7 @@ public class GetAvailableCrimes {
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
                 dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                dbSuffix.length() >= 1 &&
+                !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
 

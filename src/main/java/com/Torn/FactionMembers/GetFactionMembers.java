@@ -23,12 +23,6 @@ public class GetFactionMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetFactionMembers.class);
 
-    private static final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build();
-
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
@@ -220,7 +214,7 @@ public class GetFactionMembers {
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
                 dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                dbSuffix.length() >= 1 &&
+                !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
 
@@ -228,8 +222,7 @@ public class GetFactionMembers {
         List<FactionMember> members = new ArrayList<>();
 
         // Construct proper Torn API URL
-        String url = Constants.API_URL_FACTION + factionInfo.getFactionId() +
-                Constants.API_URL_FACTION_MEMBERS + factionInfo.getApiKey();
+        String url = Constants.API_URL_FACTION + "/" + factionInfo.getFactionId() + Constants.API_URL_FACTION_MEMBERS;
 
         logger.debug("Fetching faction members for faction: {}", factionInfo.getFactionId());
 
@@ -277,12 +270,12 @@ public class GetFactionMembers {
             }
 
             // Parse members - Torn API returns members as an ARRAY, not an object
-            JsonNode membersNode = jsonResponse.get(Constants.MEMBERS);
+            JsonNode membersNode = jsonResponse.get(Constants.NODE_MEMBERS);
             if (membersNode != null && membersNode.isArray()) {
                 for (JsonNode memberNode : membersNode) {
                     try {
-                        JsonNode idNode = memberNode.get(Constants.ID);
-                        JsonNode nameNode = memberNode.get(Constants.NAME);
+                        JsonNode idNode = memberNode.get(Constants.NODE_ID);
+                        JsonNode nameNode = memberNode.get(Constants.NODE_NAME);
 
                         if (idNode != null && nameNode != null) {
                             String userId = idNode.asText();
@@ -330,7 +323,7 @@ public class GetFactionMembers {
 
     private static void writeFactionMembersToDatabase(Connection connection, FactionInfo factionInfo,
                                                       List<FactionMember> members) throws SQLException {
-        String tableName = Constants.FACTION_MEMBERS_TABLE_PREFIX + factionInfo.getDbSuffix();
+        String tableName = Constants.TABLE_NAME_FACTION_MEMBERS + factionInfo.getDbSuffix();
 
         logger.debug("Writing {} members to table: {}", members.size(), tableName);
 

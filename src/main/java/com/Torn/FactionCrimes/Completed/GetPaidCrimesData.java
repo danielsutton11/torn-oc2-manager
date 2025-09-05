@@ -28,9 +28,9 @@ public class GetPaidCrimesData {
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
-    // Look back 30 days for payout data
-    private static final int PAYOUT_LOOKBACK_DAYS = 30;
-    private static final int MAX_PAGES_PAYOUT = 20; // Reasonable limit for payout sync
+    // Default lookback times (can be overridden by environment variables)
+    private static final int DEFAULT_PAYOUT_LOOKBACK_HOURS = 168; // Default 168 hours (7 days) for payout look back
+    private static final int MAX_PAGES_PAYOUT = 15; // Reasonable limit for payout sync
 
     public static class FactionInfo {
         private final String factionId;
@@ -71,7 +71,7 @@ public class GetPaidCrimesData {
      * Main entry point for processing payout data for all factions
      */
     public static void fetchAndProcessAllPaidCrimes() throws SQLException, IOException {
-        logger.info("Starting paid crimes processing for all factions with robust API handling");
+        logger.info("Starting paid crimes processing for all factions with configurable timestamp filtering");
 
         String databaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
         if (databaseUrl == null || databaseUrl.isEmpty()) {
@@ -123,7 +123,7 @@ public class GetPaidCrimesData {
                         logger.error("Circuit breaker opened during processing - stopping remaining factions");
                         break;
                     } else {
-                        logger.error("✗ Failed to process paid crimes for faction {} ({}): {}",
+                        logger.error("Failed to process paid crimes for faction {} ({}): {}",
                                 factionInfo.getFactionId(), factionInfo.getOwnerName(),
                                 result.getErrorMessage());
                         failedCount++;
@@ -142,7 +142,7 @@ public class GetPaidCrimesData {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    logger.error("✗ Unexpected error processing paid crimes for faction {}: {}",
+                    logger.error("Unexpected error processing paid crimes for faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                     failedCount++;
                 }
@@ -160,7 +160,7 @@ public class GetPaidCrimesData {
             logger.info("Final circuit breaker status: {}", cbStatus);
 
             if (failedCount > successfulCount && processedCount > 2) {
-                logger.error("⚠ More than half of factions failed - Torn API may be experiencing issues");
+                logger.error("More than half of factions failed - Torn API may be experiencing issues");
             }
 
         } catch (SQLException e) {
@@ -226,7 +226,7 @@ public class GetPaidCrimesData {
      */
     private static PaidCrimesResult fetchAndProcessPaidCrimesForFaction(Connection connection, FactionInfo factionInfo) {
         try {
-            String rewardsTableName = "r_crimes_" + factionInfo.getDbSuffix();
+            String rewardsTableName = Constants.TABLE_NAME_REWARDS_CRIMES + factionInfo.getDbSuffix();
 
             // Get crimes that need payout data
             List<UnpaidCrime> unpaidCrimes = getUnpaidCrimes(connection, rewardsTableName);
@@ -238,9 +238,15 @@ public class GetPaidCrimesData {
             logger.info("Found {} crimes needing payout data for faction {}",
                     unpaidCrimes.size(), factionInfo.getFactionId());
 
-            // Fetch payout data from Torn API (30 days lookback)
-            long timestampOffset = Instant.now().minusSeconds(PAYOUT_LOOKBACK_DAYS * 24 * 60 * 60).getEpochSecond();
-            Map<Long, PayoutData> payoutDataMap = fetchPayoutData(factionInfo, timestampOffset);
+            // FIXED: Get timestamp for API filtering based on environment variables and database state
+            PayoutTimestampConfig timestampConfig = getPayoutTimestampConfig(connection, rewardsTableName);
+            logger.info("Fetching payout data for faction {} ({})",
+                    factionInfo.getFactionId(),
+                    timestampConfig.isInitialSync() ? "Initial sync - getting ALL payout data" :
+                            "Incremental update from timestamp: " + formatTimestamp(timestampConfig.getFromTimestamp()));
+
+            // Fetch payout data from Torn API with timestamp filtering
+            Map<Long, PayoutData> payoutDataMap = fetchPayoutData(factionInfo, timestampConfig);
 
             if (payoutDataMap.isEmpty()) {
                 logger.debug("No payout data found in API for faction {}", factionInfo.getFactionId());
@@ -261,6 +267,92 @@ public class GetPaidCrimesData {
     }
 
     /**
+     * FIXED: Get timestamp for payout data filtering based on environment variables and database state
+     */
+    private static PayoutTimestampConfig getPayoutTimestampConfig(Connection connection, String rewardsTableName) {
+        // Check for environment variable override first
+        String overrideFromTimestamp = System.getenv(Constants.OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP);
+        if (overrideFromTimestamp != null && !overrideFromTimestamp.trim().isEmpty()) {
+            try {
+                long fromTimestamp = Long.parseLong(overrideFromTimestamp.trim());
+                logger.info("Using override payout FROM timestamp from environment: {} ({})",
+                        fromTimestamp, formatTimestamp(fromTimestamp));
+                return new PayoutTimestampConfig(false, fromTimestamp);
+            } catch (NumberFormatException e) {
+                logger.error("Invalid PAYOUT_CRIMES_FROM_TIMESTAMP format: {}, using default", overrideFromTimestamp);
+            }
+        }
+
+        // Check if this is initial sync (no payout data exists yet)
+        try {
+            String countSql = "SELECT COUNT(*) FROM " + rewardsTableName + " WHERE paid_date IS NOT NULL AND paid_date != ''";
+            try (PreparedStatement pstmt = connection.prepareStatement(countSql);
+                 ResultSet rs = pstmt.executeQuery()) {
+
+                if (rs.next() && rs.getInt(1) == 0) {
+                    // No payout data exists - do initial sync to get ALL data
+                    logger.info("No existing payout data found - performing initial sync (getting ALL payout data)");
+                    return new PayoutTimestampConfig(true, null);
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("Could not check existing payout data, defaulting to incremental: {}", e.getMessage());
+        }
+
+        // Check for custom look back period for incremental updates
+        int lookbackHours = getEnvironmentInt(Constants.OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS, DEFAULT_PAYOUT_LOOKBACK_HOURS);
+        if(lookbackHours == 0) {lookbackHours = DEFAULT_PAYOUT_LOOKBACK_HOURS;}
+
+        // For regular runs, use incremental approach with timestamp
+        long fromTimestamp = Instant.now().minusSeconds(lookbackHours * 3600L).getEpochSecond();
+        logger.info("Using calculated payout FROM timestamp: {} ({} hours ago)",
+                fromTimestamp, lookbackHours);
+        return new PayoutTimestampConfig(false, fromTimestamp);
+    }
+
+    /**
+     * Helper class to hold payout timestamp configuration
+     */
+    private static class PayoutTimestampConfig {
+        private final boolean isInitialSync;
+        private final Long fromTimestamp;
+
+        public PayoutTimestampConfig(boolean isInitialSync, Long fromTimestamp) {
+            this.isInitialSync = isInitialSync;
+            this.fromTimestamp = fromTimestamp;
+        }
+
+        public boolean isInitialSync() { return isInitialSync; }
+        public Long getFromTimestamp() { return fromTimestamp; }
+    }
+
+    /**
+     * Helper to get integer from environment with default fallback
+     */
+    private static int getEnvironmentInt(String envVar, int defaultValue) {
+        String value = System.getenv(envVar);
+        if (value != null && !value.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(value.trim());
+                logger.info("Using {} = {} from environment", envVar, parsed);
+                return parsed;
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid {} format: {}, using default: {}", envVar, value, defaultValue);
+            }
+        }
+        return defaultValue;
+    }
+
+    /**
+     * Format timestamp for logging
+     */
+    private static String formatTimestamp(Long timestamp) {
+        if (timestamp == null) return "null";
+        return LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern(Constants.TIMESTAMP_FORMAT));
+    }
+
+    /**
      * Get crimes that need payout data (missing paid_date)
      */
     private static List<UnpaidCrime> getUnpaidCrimes(Connection connection, String rewardsTableName) throws SQLException {
@@ -273,9 +365,9 @@ public class GetPaidCrimesData {
              ResultSet rs = pstmt.executeQuery()) {
 
             while (rs.next()) {
-                Long crimeId = rs.getLong("crime_id");
-                String crimeName = rs.getString("crime_name");
-                Long crimeValue = rs.getLong("crime_value");
+                Long crimeId = rs.getLong(Constants.COLUMN_NAME_CRIME_ID);
+                String crimeName = rs.getString(Constants.COLUMN_NAME_CRIME_NAME);
+                Long crimeValue = rs.getLong(Constants.COLUMN_NAME_CRIME_VALUE);
 
                 unpaidCrimes.add(new UnpaidCrime(crimeId, crimeName, crimeValue));
             }
@@ -285,9 +377,9 @@ public class GetPaidCrimesData {
     }
 
     /**
-     * Fetch payout data from Torn API
+     * FIXED: Fetch payout data from Torn API with 'from' timestamp parameter
      */
-    private static Map<Long, PayoutData> fetchPayoutData(FactionInfo factionInfo, long timestampOffset) {
+    private static Map<Long, PayoutData> fetchPayoutData(FactionInfo factionInfo, PayoutTimestampConfig timestampConfig) {
         Map<Long, PayoutData> payoutDataMap = new HashMap<>();
 
         try {
@@ -295,11 +387,13 @@ public class GetPaidCrimesData {
             boolean hasMoreData = true;
 
             while (hasMoreData && currentPage < MAX_PAGES_PAYOUT) {
-                // Construct API URL with timestamp offset for 30 days lookback
-                String apiUrl = Constants.API_URL_TORN_BASE_URL + "faction/crimes?cat=completed&offset=" +
-                        currentPage + "&sort=DESC&timestamp=" + timestampOffset + "&key=" + factionInfo.getApiKey();
+                // FIXED: Construct API URL with 'from' parameter for timestamp filtering
+                String apiUrl = buildPayoutApiUrl(factionInfo.getApiKey(), currentPage, timestampConfig.getFromTimestamp());
 
-                logger.debug("Fetching payout data page {} for faction: {}", currentPage, factionInfo.getFactionId());
+                logger.debug("Fetching payout data page {} for faction: {} ({})",
+                        currentPage, factionInfo.getFactionId(),
+                        timestampConfig.getFromTimestamp() != null ?
+                                "from timestamp: " + timestampConfig.getFromTimestamp() : "getting ALL data");
 
                 // Use robust API handler
                 ApiResponse response = TornApiHandler.executeRequest(apiUrl, factionInfo.getApiKey());
@@ -356,6 +450,22 @@ public class GetPaidCrimesData {
     }
 
     /**
+     * Build API URL with 'from' parameter for timestamp filtering (only for incremental updates)
+     */
+    private static String buildPayoutApiUrl(String apiKey, int currentPage, Long fromTimestamp) {
+        StringBuilder url = new StringBuilder();
+        url.append(Constants.API_URL_COMPLETED_FACTION_CRIMES)
+                .append(currentPage)
+                .append(Constants.API_URL_TORN_PARAMETER_JOIN_AND + Constants.API_URL_TORN_PARAMETER_SORT + Constants.API_URL_TORN_PARAMETER_DESC);
+
+        if (fromTimestamp != null) {
+            url.append(Constants.API_URL_TORN_PARAMETER_JOIN_AND + Constants.API_URL_TORN_PARAMETER_FROM).append(fromTimestamp);
+        }
+
+        return url.toString();
+    }
+
+    /**
      * Extract payout data from a crime's rewards
      */
     private static PayoutData extractPayoutData(Crime crime) {
@@ -375,8 +485,8 @@ public class GetPaidCrimesData {
             }
 
             // Extract payout information
-            Number percentageNum = (Number) payout.get("percentage");
-            Number paidAtNum = (Number) payout.get("paid_at");
+            Number percentageNum = (Number) payout.get(Constants.NODE_PERCENTAGE);
+            Number paidAtNum = (Number) payout.get(Constants.NODE_PAID_AT);
 
             if (percentageNum != null && paidAtNum != null) {
                 double percentage = percentageNum.doubleValue();
@@ -448,7 +558,7 @@ public class GetPaidCrimesData {
                 ZoneId.systemDefault()
         );
 
-        return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        return dateTime.format(DateTimeFormatter.ofPattern(Constants.TIMESTAMP_FORMAT));
     }
 
     // Utility methods

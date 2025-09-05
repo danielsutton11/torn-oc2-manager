@@ -29,18 +29,19 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
-
-//TODO: Combine get market item name and price into a single call - TEST THIS
 public class GetCompletedData {
 
     private static final Logger logger = LoggerFactory.getLogger(GetCompletedData.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
-    // Constants for pagination and incremental updates
+    // Constants for pagination
     private static final int CRIMES_PER_PAGE = 10; // Torn API default
     private static final int MAX_PAGES_INITIAL = 100; // Reasonable limit for initial sync
-    private static final int MAX_PAGES_INCREMENTAL = 5; // For 15-minute incremental updates
+    private static final int MAX_PAGES_INCREMENTAL = 10; // For incremental updates
+
+    //Default look back time for incremental updates (can be overridden by environment variables)
+    private static final int DEFAULT_INCREMENTAL_MINUTES = 15; // Default 15 minutes for incremental
 
     public static class FactionInfo {
         private final String factionId;
@@ -61,33 +62,11 @@ public class GetCompletedData {
         public String getOwnerName() { return ownerName; }
     }
 
-    public static class CompletedCrimeUser {
-        private final Long userId;
-        private final String username;
-        private final String role;
-        private final String outcome;
-        private final Double progress;
-
-        public CompletedCrimeUser(Long userId, String username, String role, String outcome, Double progress) {
-            this.userId = userId;
-            this.username = username;
-            this.role = role;
-            this.outcome = outcome;
-            this.progress = progress;
-        }
-
-        public Long getUserId() { return userId; }
-        public String getUsername() { return username; }
-        public String getRole() { return role; }
-        public String getOutcome() { return outcome; }
-        public Double getProgress() { return progress; }
-    }
-
     /**
      * Main entry point for fetching completed crimes for all factions
      */
     public static void fetchAndProcessAllCompletedCrimes() throws SQLException, IOException {
-        logger.info("Starting completed crimes fetch for all factions with robust API handling");
+        logger.info("Starting completed crimes fetch for all factions with configurable timestamp filtering");
 
         String databaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
         if (databaseUrl == null || databaseUrl.isEmpty()) {
@@ -130,7 +109,7 @@ public class GetCompletedData {
                     CompletedCrimesResult result = fetchAndStoreCompletedCrimesForFaction(connection, factionInfo);
 
                     if (result.isSuccess()) {
-                        logger.info("✓ Successfully processed {} completed crimes for faction {} ({})",
+                        logger.info("Successfully processed {} completed crimes for faction {} ({})",
                                 result.getCrimesProcessed(), factionInfo.getFactionId(),
                                 factionInfo.getOwnerName());
                         successfulCount++;
@@ -139,7 +118,7 @@ public class GetCompletedData {
                         logger.error("Circuit breaker opened during processing - stopping remaining factions");
                         break;
                     } else {
-                        logger.error("✗ Failed to process completed crimes for faction {} ({}): {}",
+                        logger.error("Failed to process completed crimes for faction {} ({}): {}",
                                 factionInfo.getFactionId(), factionInfo.getOwnerName(),
                                 result.getErrorMessage());
                         failedCount++;
@@ -176,7 +155,7 @@ public class GetCompletedData {
             logger.info("Final circuit breaker status: {}", cbStatus);
 
             if (failedCount > successfulCount && processedCount > 2) {
-                logger.error("⚠ More than half of factions failed - Torn API may be experiencing issues");
+                logger.error("More than half of factions failed - Torn API may be experiencing issues");
             }
 
         } catch (SQLException e) {
@@ -242,15 +221,18 @@ public class GetCompletedData {
      */
     private static CompletedCrimesResult fetchAndStoreCompletedCrimesForFaction(Connection connection, FactionInfo factionInfo) {
         try {
-            String tableName = "c_crimes_" + factionInfo.getDbSuffix();
+            String tableName = Constants.TABLE_NAME_COMPLETED_CRIMES + factionInfo.getDbSuffix();
             createCompletedCrimesTableIfNotExists(connection, tableName);
 
-            // Check if this is initial sync or incremental update
-            boolean isInitialSync = isInitialSync(connection, tableName);
-            int maxPages = isInitialSync ? MAX_PAGES_INITIAL : MAX_PAGES_INCREMENTAL;
+            //Determine timestamp filtering based on environment variables and table state
+            TimestampConfig timestampConfig = getTimestampConfig(connection, tableName);
+            int maxPages = timestampConfig.isInitialSync() ? MAX_PAGES_INITIAL : MAX_PAGES_INCREMENTAL;
 
-            logger.info("Processing completed crimes for faction {} ({})",
-                    factionInfo.getFactionId(), isInitialSync ? "Initial sync" : "Incremental update");
+            logger.info("Processing completed crimes for faction {} ({}, {})",
+                    factionInfo.getFactionId(),
+                    timestampConfig.isInitialSync() ? "Initial sync - getting ALL data" : "Incremental update",
+                    timestampConfig.getFromTimestamp() != null ?
+                            "from timestamp: " + formatTimestamp(timestampConfig.getFromTimestamp()) : "no timestamp filter");
 
             int totalCrimesProcessed = 0;
             int currentPage = 0;
@@ -260,11 +242,13 @@ public class GetCompletedData {
             Map<Long, String> usernameMap = loadUsernameMap(factionInfo);
 
             while (hasMoreData && currentPage < maxPages) {
-                // Construct API URL with pagination
-                String apiUrl = Constants.API_URL_TORN_BASE_URL + "faction/crimes?cat=completed&offset=" +
-                        currentPage + "&sort=DESC&key=" + factionInfo.getApiKey();
+                // Construct API URL with 'from' parameter for timestamp filtering
+                String apiUrl = buildApiUrl(currentPage, timestampConfig.getFromTimestamp());
 
-                logger.debug("Fetching completed crimes page {} for faction: {}", currentPage, factionInfo.getFactionId());
+                logger.debug("Fetching completed crimes page {} for faction: {} ({})",
+                        currentPage, factionInfo.getFactionId(),
+                        timestampConfig.getFromTimestamp() != null ?
+                                "from timestamp: " + timestampConfig.getFromTimestamp() : "getting ALL data");
 
                 // Use robust API handler
                 ApiResponse response = TornApiHandler.executeRequest(apiUrl, factionInfo.getApiKey());
@@ -281,7 +265,7 @@ public class GetCompletedData {
 
                     // Filter for completed crimes only
                     List<Crime> completedCrimes = crimesResponse.getCrimes().stream()
-                            .filter(crime -> "completed".equalsIgnoreCase(crime.getStatus()) ||
+                            .filter(crime -> Constants.COMPLETED.equalsIgnoreCase(crime.getStatus()) ||
                                     crime.getExecutedAt() != null)
                             .collect(Collectors.toList());
 
@@ -293,7 +277,7 @@ public class GetCompletedData {
 
                     // Process and store crimes
                     int crimesInPage = processCompletedCrimesPage(connection, tableName, completedCrimes,
-                            factionInfo, usernameMap);
+                            factionInfo, usernameMap, timestampConfig.isInitialSync());
                     totalCrimesProcessed += crimesInPage;
 
                     // Check if we got less than a full page (indicates end of data)
@@ -342,11 +326,134 @@ public class GetCompletedData {
     }
 
     /**
+     * Get timestamp configuration based on environment variables or defaults
+     */
+    private static TimestampConfig getTimestampConfig(Connection connection, String tableName) throws SQLException {
+        // Check for environment variable overrides first
+        String overrideFromTimestamp = System.getenv(Constants.OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP);
+        if (overrideFromTimestamp != null && !overrideFromTimestamp.trim().isEmpty()) {
+            try {
+                long fromTimestamp = Long.parseLong(overrideFromTimestamp.trim());
+                logger.info("Using override FROM timestamp from environment: {} ({})",
+                        fromTimestamp, formatTimestamp(fromTimestamp));
+                return new TimestampConfig(false, fromTimestamp);
+            } catch (NumberFormatException e) {
+                logger.error("Invalid COMPLETED_CRIMES_FROM_TIMESTAMP format: {}, ignoring", overrideFromTimestamp);
+            }
+        }
+
+        // Check for custom look back period for incremental updates
+        int incrementalMinutes = getEnvironmentInt(Constants.OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES, DEFAULT_INCREMENTAL_MINUTES);
+        if(incrementalMinutes == 0) {incrementalMinutes = DEFAULT_INCREMENTAL_MINUTES;}
+
+
+        // Check if table exists and has recent data
+        String countSql = "SELECT COUNT(*) as row_count, MAX(last_updated) as last_update FROM " + tableName;
+
+        try (PreparedStatement pstmt = connection.prepareStatement(countSql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            if (rs.next()) {
+                int rowCount = rs.getInt(Constants.ROW_COUNT);
+                Timestamp lastUpdate = rs.getTimestamp(Constants.COLUMN_NAME_LAST_UPDATE);
+
+                if (rowCount == 0 || lastUpdate == null) {
+                    // Initial sync - get ALL data (no timestamp filter)
+                    logger.info("Table {} is empty - performing initial sync (getting ALL completed crimes)", tableName);
+                    return new TimestampConfig(true, null);
+                }
+
+                // Check if last update was more than incrementalMinutes ago
+                Instant lastUpdateInstant = lastUpdate.toInstant();
+                Instant cutoffTime = Instant.now().minusSeconds(incrementalMinutes * 60L);
+
+                if (lastUpdateInstant.isBefore(cutoffTime)) {
+                    // Been too long, do initial sync
+                    logger.info("Table {} last updated at {} (more than {} minutes ago) - performing initial sync (getting ALL completed crimes)",
+                            tableName, lastUpdate, incrementalMinutes);
+                    return new TimestampConfig(true, null);
+                } else {
+                    // Recent data, do incremental update
+                    long fromTimestamp = Instant.now().minusSeconds(incrementalMinutes * 60L).getEpochSecond();
+                    logger.info("Table {} was recently updated at {} - performing incremental sync from {} minutes ago (timestamp: {})",
+                            tableName, lastUpdate, incrementalMinutes, fromTimestamp);
+                    return new TimestampConfig(false, fromTimestamp);
+                }
+            }
+        } catch (SQLException e) {
+            // Table might not exist yet
+            logger.debug("Table {} might not exist yet, treating as initial sync: {}", tableName, e.getMessage());
+            return new TimestampConfig(true, null);
+        }
+
+        // Fallback
+        return new TimestampConfig(true, null);
+    }
+
+    /**
+     * Helper to get integer from environment with default fallback
+     */
+    private static int getEnvironmentInt(String envVar, int defaultValue) {
+        String value = System.getenv(envVar);
+        if (value != null && !value.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(value.trim());
+                logger.info("Using {} = {} from environment", envVar, parsed);
+                return parsed;
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid {} format: {}, using default: {}", envVar, value, defaultValue);
+            }
+        }
+        return defaultValue;
+    }
+
+    /**
+     * Helper class to hold timestamp configuration
+     */
+    private static class TimestampConfig {
+        private final boolean isInitialSync;
+        private final Long fromTimestamp;
+
+        public TimestampConfig(boolean isInitialSync, Long fromTimestamp) {
+            this.isInitialSync = isInitialSync;
+            this.fromTimestamp = fromTimestamp;
+        }
+
+        public boolean isInitialSync() { return isInitialSync; }
+        public Long getFromTimestamp() { return fromTimestamp; }
+    }
+
+    /**
+     * Build API URL with 'from' parameter for timestamp filtering
+     */
+    private static String buildApiUrl(int currentPage, Long fromTimestamp) {
+        StringBuilder url = new StringBuilder();
+        url.append(Constants.API_URL_COMPLETED_FACTION_CRIMES)
+                .append(currentPage)
+                .append(Constants.API_URL_TORN_PARAMETER_JOIN_AND + Constants.API_URL_TORN_PARAMETER_SORT + Constants.API_URL_TORN_PARAMETER_DESC);
+
+        if (fromTimestamp != null) {
+            url.append(Constants.API_URL_TORN_PARAMETER_JOIN_AND + Constants.API_URL_TORN_PARAMETER_FROM).append(fromTimestamp);
+        }
+
+        return url.toString();
+    }
+
+    /**
+     * Format timestamp for logging
+     */
+    private static String formatTimestamp(Long timestamp) {
+        if (timestamp == null) return "null";
+        return LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern(Constants.TIMESTAMP_FORMAT));
+    }
+
+    /**
      * Load username mapping from members table
      */
     private static Map<Long, String> loadUsernameMap(FactionInfo factionInfo) {
         Map<Long, String> usernameMap = new HashMap<>();
-        String membersTableName = Constants.FACTION_MEMBERS_TABLE_PREFIX + factionInfo.getDbSuffix();
+        String membersTableName = Constants.TABLE_NAME_FACTION_MEMBERS + factionInfo.getDbSuffix();
 
         String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         if (configDatabaseUrl == null) {
@@ -362,13 +469,13 @@ public class GetCompletedData {
 
                 while (rs.next()) {
                     try {
-                        Long userId = Long.parseLong(rs.getString("user_id"));
-                        String username = rs.getString("username");
+                        Long userId = Long.parseLong(rs.getString(Constants.COLUMN_NAME_USER_ID));
+                        String username = rs.getString(Constants.COLUMN_NAME_USER_NAME);
                         if (username != null) {
                             usernameMap.put(userId, username);
                         }
                     } catch (NumberFormatException e) {
-                        logger.debug("Invalid user_id format in members table: {}", rs.getString("user_id"));
+                        logger.debug("Invalid user_id format in members table: {}", rs.getString(Constants.COLUMN_NAME_USER_ID));
                     }
                 }
 
@@ -383,32 +490,13 @@ public class GetCompletedData {
     }
 
     /**
-     * Check if this is the initial sync (table is empty or doesn't exist)
-     */
-    private static boolean isInitialSync(Connection connection, String tableName) throws SQLException {
-        String sql = "SELECT COUNT(*) FROM " + tableName + " LIMIT 1";
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-
-            if (rs.next()) {
-                return rs.getInt(1) == 0;
-            }
-        } catch (SQLException e) {
-            // Table might not exist yet
-            logger.debug("Table {} might not exist yet, treating as initial sync", tableName);
-            return true;
-        }
-
-        return true;
-    }
-
-    /**
      * Process a page of completed crimes and store in database
      */
     private static int processCompletedCrimesPage(Connection connection, String tableName, List<Crime> crimes,
-                                                  FactionInfo factionInfo, Map<Long, String> usernameMap) throws SQLException {
+                                                  FactionInfo factionInfo, Map<Long, String> usernameMap,
+                                                  boolean isInitialSync) throws SQLException {
 
+        // Use UPSERT for both initial and incremental to handle any overlaps
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "crime_id, faction_id, crime_name, difficulty, success, completed_at, completed_date_friendly, " +
                 "user_id, username, role, outcome, checkpoint_pass_rate, last_updated) " +
@@ -417,11 +505,11 @@ public class GetCompletedData {
                 "username = EXCLUDED.username, role = EXCLUDED.role, outcome = EXCLUDED.outcome, " +
                 "checkpoint_pass_rate = EXCLUDED.checkpoint_pass_rate, last_updated = CURRENT_TIMESTAMP";
 
-        String rewardsTableName = "r_crimes_" + factionInfo.getDbSuffix();
+        String rewardsTableName = Constants.TABLE_NAME_REWARDS_CRIMES + factionInfo.getDbSuffix();
         createRewardsTableIfNotExists(connection, rewardsTableName);
 
         int recordsInserted = 0;
-        Long factionIdLong = Long.parseLong(factionInfo.getFactionId());
+        long factionIdLong = Long.parseLong(factionInfo.getFactionId());
 
         try (PreparedStatement pstmt = connection.prepareStatement(insertSql)) {
             for (Crime crime : crimes) {
@@ -468,13 +556,13 @@ public class GetCompletedData {
 
                         willInsertCrimeRecords = true;
 
-                        // Apply role renaming logic (same as GetAvailableCrimes)
+                        // Apply role renaming logic
                         String finalRole = slot.getPosition();
                         if (group.size() > 1) {
                             finalRole = slot.getPosition() + " #" + (i + 1);
                         }
 
-                        // Get checkpoint pass rate from slot (already a percentage 0-100)
+                        // Get checkpoint pass rate from slot
                         Integer checkpointPassRate = slot.getCheckpointPassRate();
 
                         // Insert record
@@ -531,10 +619,10 @@ public class GetCompletedData {
             double totalSuccessValue = calculateTotalSuccessValue(crime);
 
             // Extract reward components
-            Number moneyReward = (Number) rewards.get("money");
+            Number moneyReward = (Number) rewards.get(Constants.NODE_MONEY);
             long money = (moneyReward != null) ? moneyReward.longValue() : 0L;
 
-            Number respectReward = (Number) rewards.get("respect");
+            Number respectReward = (Number) rewards.get(Constants.NODE_RESPECT);
             int respect = (respectReward != null) ? respectReward.intValue() : 0;
 
             // Process items with single API call per item
@@ -543,15 +631,15 @@ public class GetCompletedData {
             long crimeValue = money; // Start with money value
 
             @SuppressWarnings("unchecked")
-            List<Map<String, Object>> items = (List<Map<String, Object>>) rewards.get("items");
+            List<Map<String, Object>> items = (List<Map<String, Object>>) rewards.get(Constants.NODE_ITEMS);
             if (items != null && !items.isEmpty()) {
                 StringBuilder itemsBuilder = new StringBuilder();
                 long totalItemValue = 0;
 
                 for (int i = 0; i < items.size(); i++) {
                     Map<String, Object> item = items.get(i);
-                    Number itemIdNum = (Number) item.get("id");
-                    Number quantityNum = (Number) item.get("quantity");
+                    Number itemIdNum = (Number) item.get(Constants.NODE_ID);
+                    Number quantityNum = (Number) item.get(Constants.NODE_QUANTITY);
 
                     if (itemIdNum != null && quantityNum != null) {
                         Long itemId = itemIdNum.longValue();
@@ -580,7 +668,7 @@ public class GetCompletedData {
                 crimeValue += totalItemValue;
             }
 
-            // Insert rewards record
+            // Use UPSERT for rewards as well
             String insertRewardsSql = "INSERT INTO " + rewardsTableName + " (" +
                     "crime_id, faction_id, crime_name, total_members_required, total_success_value, " +
                     "completed_date, crime_value, items, item_quantity, respect_earnt, last_updated) " +
@@ -607,7 +695,7 @@ public class GetCompletedData {
                 rewardsPstmt.setInt(10, respect);
 
                 rewardsPstmt.executeUpdate();
-                logger.debug("Inserted rewards data for crime {}", crime.getId());
+                logger.debug("Upserted rewards data for crime {}", crime.getId());
             }
 
         } catch (Exception e) {
@@ -654,7 +742,8 @@ public class GetCompletedData {
                 return null;
             }
 
-            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN + "&key=" + apiKey;
+            String itemUrl = Constants.API_URL_MARKET + "/" + itemId + Constants.API_URL_ITEM_MARKET;
+
             ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
 
             if (response.isSuccess()) {
@@ -669,7 +758,7 @@ public class GetCompletedData {
                     // Cache the result
                     itemMarketCache.put(itemId, itemData);
 
-                    logger.debug("Fetched and cached item data for ID {}: {} (${:,})",
+                    logger.debug("Fetched and cached item data for ID {}: {} (${})",
                             itemId, itemData.getName(), itemData.getAveragePrice());
 
                     return itemData;
@@ -699,7 +788,7 @@ public class GetCompletedData {
 
         for (Slot slot : crime.getSlots()) {
             if (slot.getCheckpointPassRate() != null) {
-                // checkpoint_pass_rate is already a percentage (0-100), don't multiply
+                // checkpoint_pass_rate is already a percentage (0-100)
                 totalPassRate += slot.getCheckpointPassRate();
                 validSlots++;
             }
@@ -803,7 +892,7 @@ public class GetCompletedData {
                 "username VARCHAR(100) NOT NULL," +
                 "role VARCHAR(100) NOT NULL," +
                 "outcome VARCHAR(50)," +
-                "checkpoint_pass_rate INTEGER," + // Changed from progress_percentage to checkpoint_pass_rate
+                "checkpoint_pass_rate INTEGER," +
                 "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "PRIMARY KEY (crime_id, user_id)" +
                 ")";
@@ -826,7 +915,7 @@ public class GetCompletedData {
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
                 dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                dbSuffix.length() >= 1 &&
+                !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
 

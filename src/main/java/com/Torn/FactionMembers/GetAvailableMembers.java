@@ -149,7 +149,7 @@ public class GetAvailableMembers {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    logger.error("✗ Unexpected error processing members for faction {}: {}",
+                    logger.error("Unexpected error processing members for faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                     failedCount++;
                 }
@@ -169,7 +169,7 @@ public class GetAvailableMembers {
 
             // Warn if many factions failed
             if (failedCount > successfulCount && processedCount > 2) {
-                logger.error("⚠ More than half of factions failed - Torn API may be experiencing issues");
+                logger.error("More than half of factions failed - Torn API may be experiencing issues");
             }
 
         } catch (SQLException e) {
@@ -238,8 +238,7 @@ public class GetAvailableMembers {
     private static MembersProcessingResult fetchAndStoreMembersForFaction(Connection connection, FactionInfo factionInfo) {
         try {
             // Construct API URL for this faction's members
-            String apiUrl = Constants.API_URL_FACTION + factionInfo.getFactionId() +
-                    Constants.API_URL_FACTION_MEMBERS + factionInfo.getApiKey();
+            String apiUrl = Constants.API_URL_FACTION + "/" + factionInfo.getFactionId() + Constants.API_URL_FACTION_MEMBERS;
 
             logger.debug("Fetching members for faction: {}", factionInfo.getFactionId());
 
@@ -295,14 +294,14 @@ public class GetAvailableMembers {
             }
 
             // Parse members - Torn API returns members as an ARRAY
-            JsonNode membersNode = jsonResponse.get(Constants.MEMBERS);
+            JsonNode membersNode = jsonResponse.get(Constants.NODE_MEMBERS);
             if (membersNode == null || !membersNode.isArray()) {
                 logger.warn("No members array found in API response for faction {}", factionInfo.getFactionId());
                 return MembersProcessingResult.success(0, 0);
             }
 
             // Create faction-specific table
-            String tableName = "a_members_" + factionInfo.getDbSuffix();
+            String tableName = Constants.TABLE_NAME_AVAILABLE_MEMBERS + factionInfo.getDbSuffix();
             createMembersTableIfNotExists(connection, tableName);
 
             // Parse members from response
@@ -354,12 +353,12 @@ public class GetAvailableMembers {
 
         for (JsonNode memberNode : membersNode) {
             try {
-                JsonNode idNode = memberNode.get(Constants.ID);
-                JsonNode nameNode = memberNode.get(Constants.NAME);
-                JsonNode isInOcNode = memberNode.get("is_in_oc");
-                JsonNode statusNode = memberNode.get("status");
-                JsonNode levelNode = memberNode.get("level");
-                JsonNode lastActionNode = memberNode.get("last_action");
+                JsonNode idNode = memberNode.get(Constants.NODE_ID);
+                JsonNode nameNode = memberNode.get(Constants.NODE_NAME);
+                JsonNode isInOcNode = memberNode.get(Constants.NODE_IS_IN_OC);
+                JsonNode statusNode = memberNode.get(Constants.NODE_STATUS);
+                JsonNode levelNode = memberNode.get(Constants.NODE_LEVEL);
+                JsonNode lastActionNode = memberNode.get(Constants.NODE_lAST_ACTION);
 
                 if (idNode != null && nameNode != null && isInOcNode != null) {
                     totalMembers++;
@@ -464,7 +463,7 @@ public class GetAvailableMembers {
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
                 dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                dbSuffix.length() >= 1 &&
+                !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
 

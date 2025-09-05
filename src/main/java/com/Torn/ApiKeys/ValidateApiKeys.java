@@ -140,7 +140,7 @@ public class ValidateApiKeys {
         logger.debug("Validating API key: {} for faction: {}", maskedKey, factionId);
 
         // Use the robust API handler
-        ApiResponse response = TornApiHandler.executeRequest(Constants.API_URL_VALIDATE_KEY, apiKey);
+        ApiResponse response = TornApiHandler.executeRequest(Constants.API_URL_FACTION_CRIMES, apiKey);
 
         // Handle different response types
         ValidationResult result = processApiResponse(response, maskedKey, factionId);
@@ -367,12 +367,12 @@ public class ValidateApiKeys {
         String sql = "UPDATE " + Constants.TABLE_NAME_API_KEYS +
                 " SET " + Constants.COLUMN_NAME_ACTIVE + " = ? " +
                 " WHERE " + Constants.COLUMN_NAME_API_KEY + " = ? " +
-                " AND " + Constants.COLUMN_NAME_FACTION_ID + " = ?::bigint"; // Cast to bigint
+                " AND " + Constants.COLUMN_NAME_FACTION_ID + " = ?::bigint";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setBoolean(1, active);
             pstmt.setString(2, apiKey);
-            pstmt.setString(3, factionId); // Still pass as string, but SQL will cast it
+            pstmt.setString(3, factionId);
 
             int rowsAffected = pstmt.executeUpdate();
             if (rowsAffected > 0) {

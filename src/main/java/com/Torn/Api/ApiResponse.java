@@ -131,9 +131,9 @@ public class ApiResponse {
             sb.append(", error='").append(errorMessage).append("'");
         }
 
-        if (body != null && body.length() > 0) {
+        if (body != null && !body.isEmpty()) {
             int previewLength = Math.min(body.length(), 100);
-            sb.append(", bodyPreview='").append(body.substring(0, previewLength));
+            sb.append(", bodyPreview='").append(body, 0, previewLength);
             if (body.length() > 100) {
                 sb.append("...");
             }

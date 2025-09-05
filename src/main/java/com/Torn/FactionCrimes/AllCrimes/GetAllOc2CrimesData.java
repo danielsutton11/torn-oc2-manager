@@ -191,9 +191,9 @@ public class GetAllOc2CrimesData {
      * Fetch OC2 crimes data from Torn API
      */
     private static String fetchOC2CrimesFromApi(String apiKey) {
-        String apiUrl = Constants.API_URL_TORN_BASE_URL + "torn/organizedcrimes?key=" + apiKey;
+        String apiUrl = Constants.API_URL_TORN_ORGANISED_CRIMES;
 
-        logger.debug("Fetching OC2 crimes from: {}", apiUrl.replaceAll("key=[^&]+", "key=***"));
+        logger.debug("Fetching OC2 crimes from: {}", apiUrl);
 
         ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
 
@@ -217,10 +217,10 @@ public class GetAllOc2CrimesData {
 
         try {
             JsonNode rootNode = objectMapper.readTree(jsonResponse);
-            JsonNode organizedCrimesNode = rootNode.get("organizedcrimes");
+            JsonNode organizedCrimesNode = rootNode.get(Constants.NODE_ORGANIZED_CRIMES);
 
             if (organizedCrimesNode == null || !organizedCrimesNode.isArray()) {
-                logger.error("Invalid response format - missing or invalid organizedcrimes array");
+                logger.error("Invalid response format - missing or invalid organisedcrimes array");
                 return crimes;
             }
 
@@ -248,14 +248,14 @@ public class GetAllOc2CrimesData {
      */
     private static OC2Crime parseSingleCrime(JsonNode crimeNode, String apiKey) {
         try {
-            String name = crimeNode.get("name").asText();
-            int difficulty = crimeNode.get("difficulty").asInt();
+            String name = crimeNode.get(Constants.NODE_NAME).asText();
+            int difficulty = crimeNode.get(Constants.NODE_DIFFICULTY).asInt();
 
-            JsonNode scopeNode = crimeNode.get("scope");
-            int scopeCost = scopeNode.get("cost").asInt();
-            int scopeReturn = scopeNode.get("return").asInt();
+            JsonNode scopeNode = crimeNode.get(Constants.NODE_SCOPE);
+            int scopeCost = scopeNode.get(Constants.NODE_COST).asInt();
+            int scopeReturn = scopeNode.get(Constants.NODE_RETURN).asInt();
 
-            JsonNode slotsNode = crimeNode.get("slots");
+            JsonNode slotsNode = crimeNode.get(Constants.NODE_SLOTS);
             List<OC2Slot> slots = parseCrimeSlots(slotsNode, apiKey);
 
             int totalSlots = slots.size();
@@ -284,8 +284,8 @@ public class GetAllOc2CrimesData {
         Map<String, List<JsonNode>> groupedSlots = new HashMap<>();
 
         for (JsonNode slotNode : slotsNode) {
-            String slotId = slotNode.get("id").asText();
-            String position = slotNode.get("name").asText();
+            String slotId = slotNode.get(Constants.NODE_ID).asText();
+            String position = slotNode.get(Constants.NODE_NAME).asText();
 
             groupedSlots.computeIfAbsent(position, k -> new ArrayList<>()).add(slotNode);
         }
@@ -300,7 +300,7 @@ public class GetAllOc2CrimesData {
 
             for (int i = 0; i < group.size(); i++) {
                 JsonNode slotNode = group.get(i);
-                String slotId = slotNode.get("id").asText();
+                String slotId = slotNode.get(Constants.NODE_ID).asText();
 
                 // Apply naming logic: single slot keeps original name, multiple get #1, #2, etc.
                 String roleName = group.size() > 1 ? basePosition + " #" + (i + 1) : basePosition;
@@ -311,10 +311,10 @@ public class GetAllOc2CrimesData {
                 boolean isReusable = true;
                 Integer averagePrice = null;
 
-                JsonNode requiredItemNode = slotNode.get("required_item");
+                JsonNode requiredItemNode = slotNode.get(Constants.NODE_REQUIRED_ITEMS);
                 if (requiredItemNode != null && !requiredItemNode.isNull()) {
-                    requiredItemId = requiredItemNode.get("id").asLong();
-                    isReusable = !requiredItemNode.get("is_used").asBoolean();
+                    requiredItemId = requiredItemNode.get(Constants.NODE_ID).asLong();
+                    isReusable = !requiredItemNode.get(Constants.NODE_IS_USED).asBoolean();
 
                     // Fetch item details from market
                     Item itemDetails = fetchItemMarketSafe(requiredItemId, apiKey);
@@ -344,7 +344,7 @@ public class GetAllOc2CrimesData {
         }
 
         try {
-            String itemUrl = Constants.API_URL_ITEM_MARKET + itemId + Constants.API_URL_ITEM_MARKET_JOIN + "&key=" + apiKey;
+            String itemUrl = Constants.API_URL_MARKET + "/" + itemId + Constants.API_URL_ITEM_MARKET;
 
             ApiResponse response = TornApiHandler.executeRequest(itemUrl, apiKey);
 
@@ -497,7 +497,7 @@ public class GetAllOc2CrimesData {
             while (rs.next()) {
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
 
-                if (dbSuffix != null && isValidDbSuffix(dbSuffix)) {
+                if (isValidDbSuffix(dbSuffix)) {
                     suffixes.add(dbSuffix);
                 } else {
                     logger.warn("Invalid or null db_suffix found: {}", dbSuffix);
@@ -559,7 +559,7 @@ public class GetAllOc2CrimesData {
                         return new RewardsRange(null, null);
                     }
 
-                    logger.debug("Found rewards range for {}: ${:,} - ${:,}", crimeName, lowValue, highValue);
+                    logger.debug("Found rewards range for {}: ${} - ${}", crimeName, lowValue, highValue);
                     return new RewardsRange(lowValue, highValue);
                 }
             }
@@ -620,7 +620,7 @@ public class GetAllOc2CrimesData {
 
             // Warn if crime has more than 6 slots
             if (crime.getSlots().size() > 6) {
-                logger.warn("⚠ ATTENTION: Crime '{}' has {} slots but database only supports 6! " +
+                logger.warn("ATTENTION: Crime '{}' has {} slots but database only supports 6! " +
                                 "Slots 7+ will be lost. Consider updating schema.",
                         crime.getName(), crime.getSlots().size());
             }
@@ -645,7 +645,7 @@ public class GetAllOc2CrimesData {
     private static boolean isValidDbSuffix(String dbSuffix) {
         return dbSuffix != null &&
                 dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                dbSuffix.length() >= 1 &&
+                !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
 }
