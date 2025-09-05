@@ -16,8 +16,8 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-//TODO: TEST THIS BY changing Doc's role to one without faction API access
-//This needs more testing.
+
+//TODO: This has been tested and is working! :) 
 
 public class ValidateApiKeys {
 

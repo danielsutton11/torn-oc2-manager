@@ -13,6 +13,7 @@ import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessA
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
 import static com.Torn.FactionMembers.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
+import static com.Torn.FactionMembers.UpdateMemberCPR.updateAllFactionsCPR;
 
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
@@ -42,11 +43,11 @@ public class Execute {
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
-                    break; //TESTING
+                    break; //DONE
                 case Constants.JOB_GET_ALL_OC_CRIMES:
                     logger.info("Running Get All OC Data job");
                     fetchAndProcessAllOC2Crimes();
-                    break; //TESTING
+                    break; //DONE
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");
                     syncFactionMembers();
@@ -66,7 +67,11 @@ public class Execute {
                 case Constants.JOB_UPDATE_CRIMES_PAID_DATA:
                     logger.info("Running paid crimes data update job");
                     fetchAndProcessAllPaidCrimes();
-                    break;
+                    break; //DONE
+                case Constants.JOB_UPDATE_UPDATE_CPR_DATA:
+                    logger.info("Running paid crimes data update job");
+                    updateAllFactionsCPR();
+                    break; //DONE
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
@@ -77,6 +82,8 @@ public class Execute {
                     logger.error("Unknown job code: {}", jobCode);
                     cleanup();
                     System.exit(1);
+
+
             }
 
             logger.info("Job {} completed successfully", jobCode);

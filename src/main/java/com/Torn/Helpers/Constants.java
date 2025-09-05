@@ -11,6 +11,7 @@ public class Constants {
     public static final String JOB_CHECK_USER_ITEMS = "CHECK_ITEMS";
     public static final String JOB_CHECK_AVAILABLE_CRIMES_MEMBERS = "AVAILABLE_CRIMES_MEMBERS";
     public static final String JOB_UPDATE_CRIMES_PAID_DATA = "CRIMES_PAID";
+    public static final String JOB_UPDATE_UPDATE_CPR_DATA = "UPDATE_MEMBER_CPR";
 
     // FIXED: Use consistent naming for all environment variables
     public static final String OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP = "OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP";
