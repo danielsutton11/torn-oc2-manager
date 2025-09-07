@@ -390,7 +390,7 @@ public class GetAllOc2CrimesData {
      */
     private static void createOC2CrimesTablesIfNotExists(Connection connection) throws SQLException {
         // Create all_oc2_crimes table
-        String createCrimesTableSql = "CREATE TABLE IF NOT EXISTS all_oc2_crimes (" +
+        String createCrimesTableSql = "CREATE TABLE IF NOT EXISTS " + Constants.TABLE_NAME_OC2_CRIMES + "(" +
                 "crime_name VARCHAR(255) PRIMARY KEY," +
                 "difficulty INTEGER NOT NULL," +
                 "scope_cost INTEGER NOT NULL," +
@@ -404,7 +404,7 @@ public class GetAllOc2CrimesData {
                 ")";
 
         // Create all_oc2_crimes_slots table
-        String createSlotsTableSql = "CREATE TABLE IF NOT EXISTS all_oc2_crimes_slots (" +
+        String createSlotsTableSql = "CREATE TABLE IF NOT EXISTS " + Constants.TABLE_NAME_OC2_CRIMES_SLOTS + "(" +
                 "crime_name VARCHAR(255) NOT NULL," +
                 "slot_1 VARCHAR(100)," +
                 "slot_2 VARCHAR(100)," +
