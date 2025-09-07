@@ -1,4 +1,4 @@
-package com.Torn.FactionMembers;
+package com.Torn.FactionCrimes.Available;
 
 import com.Torn.Api.ApiResponse;
 import com.Torn.Api.TornApiHandler;
@@ -18,7 +18,6 @@ import java.sql.Statement;
 import java.util.*;
 
 
-//TODO: This is storing all members not just available members in a_members - TEST THIS
 public class GetAvailableMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetAvailableMembers.class);

@@ -238,8 +238,8 @@ public class GetCompletedData {
             int currentPage = 0;
             boolean hasMoreData = true;
 
-            // Load username lookup map from members table
-            Map<Long, String> usernameMap = loadUsernameMap(factionInfo);
+            // Load username lookup map from ALL factions (not just current faction)
+            Map<Long, String> usernameMap = loadUsernameMapAcrossAllFactions();
 
             while (hasMoreData && currentPage < maxPages) {
                 // Construct API URL with 'from' parameter for timestamp filtering
@@ -326,6 +326,96 @@ public class GetCompletedData {
     }
 
     /**
+     * Load username mapping from ALL factions' members tables (not just current faction)
+     */
+    private static Map<Long, String> loadUsernameMapAcrossAllFactions() {
+        Map<Long, String> usernameMap = new HashMap<>();
+
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        if (configDatabaseUrl == null) {
+            logger.warn("Cannot load usernames - DATABASE_URL_CONFIG not set");
+            return usernameMap;
+        }
+
+        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger)) {
+            // Get all faction suffixes
+            List<String> factionSuffixes = getAllFactionSuffixes(configConnection);
+
+            for (String factionSuffix : factionSuffixes) {
+                String membersTableName = Constants.TABLE_NAME_FACTION_MEMBERS + factionSuffix;
+
+                try {
+                    String sql = "SELECT user_id, username FROM " + membersTableName;
+
+                    try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
+                         ResultSet rs = pstmt.executeQuery()) {
+
+                        int loadedFromThisFaction = 0;
+                        while (rs.next()) {
+                            try {
+                                Long userId = Long.parseLong(rs.getString(Constants.COLUMN_NAME_USER_ID));
+                                String username = rs.getString(Constants.COLUMN_NAME_USER_NAME);
+                                if (username != null) {
+                                    // Keep the most recent username if user appears in multiple factions
+                                    usernameMap.put(userId, username);
+                                    loadedFromThisFaction++;
+                                }
+                            } catch (NumberFormatException e) {
+                                logger.debug("Invalid user_id format in table {}: {}",
+                                        membersTableName, rs.getString(Constants.COLUMN_NAME_USER_ID));
+                            }
+                        }
+
+                        logger.debug("Loaded {} usernames from faction table: {}", loadedFromThisFaction, membersTableName);
+                    }
+
+                } catch (SQLException e) {
+                    logger.debug("Could not load usernames from table {} (might not exist): {}",
+                            membersTableName, e.getMessage());
+                }
+            }
+
+            logger.info("Loaded {} total usernames across {} factions for completed crimes processing",
+                    usernameMap.size(), factionSuffixes.size());
+
+        } catch (Exception e) {
+            logger.error("Error loading cross-faction username map: {}", e.getMessage(), e);
+        }
+
+        return usernameMap;
+    }
+
+    /**
+     * Get all faction suffixes from the config database
+     */
+    private static List<String> getAllFactionSuffixes(Connection configConnection) {
+        List<String> suffixes = new ArrayList<>();
+
+        String sql = "SELECT DISTINCT " + Constants.COLUMN_NAME_DB_SUFFIX + " " +
+                "FROM " + Constants.TABLE_NAME_FACTIONS + " " +
+                "WHERE oc2_enabled = true";
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
+                if (isValidDbSuffix(dbSuffix)) {
+                    suffixes.add(dbSuffix);
+                } else {
+                    logger.warn("Invalid or null db_suffix found: {}", dbSuffix);
+                }
+            }
+
+        } catch (SQLException e) {
+            logger.error("Error fetching faction suffixes from config database", e);
+        }
+
+        logger.debug("Found {} valid faction suffixes for cross-faction username lookup", suffixes.size());
+        return suffixes;
+    }
+
+    /**
      * Get timestamp configuration based on environment variables and database state
      */
     private static TimestampConfig getTimestampConfig(Connection connection, String tableName) throws SQLException {
@@ -388,6 +478,7 @@ public class GetCompletedData {
         // Fallback
         return new TimestampConfig(true, null);
     }
+
     /**
      * Helper to get integer from environment with default fallback
      */
@@ -447,47 +538,6 @@ public class GetCompletedData {
     }
 
     /**
-     * Load username mapping from members table
-     */
-    private static Map<Long, String> loadUsernameMap(FactionInfo factionInfo) {
-        Map<Long, String> usernameMap = new HashMap<>();
-        String membersTableName = Constants.TABLE_NAME_FACTION_MEMBERS + factionInfo.getDbSuffix();
-
-        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
-        if (configDatabaseUrl == null) {
-            logger.warn("Cannot load usernames - DATABASE_URL_CONFIG not set");
-            return usernameMap;
-        }
-
-        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger)) {
-            String sql = "SELECT user_id, username FROM " + membersTableName;
-
-            try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
-                 ResultSet rs = pstmt.executeQuery()) {
-
-                while (rs.next()) {
-                    try {
-                        Long userId = Long.parseLong(rs.getString(Constants.COLUMN_NAME_USER_ID));
-                        String username = rs.getString(Constants.COLUMN_NAME_USER_NAME);
-                        if (username != null) {
-                            usernameMap.put(userId, username);
-                        }
-                    } catch (NumberFormatException e) {
-                        logger.debug("Invalid user_id format in members table: {}", rs.getString(Constants.COLUMN_NAME_USER_ID));
-                    }
-                }
-
-                logger.debug("Loaded {} usernames for faction {}", usernameMap.size(), factionInfo.getFactionId());
-            }
-
-        } catch (Exception e) {
-            logger.warn("Error loading username map for faction {}: {}", factionInfo.getFactionId(), e.getMessage());
-        }
-
-        return usernameMap;
-    }
-
-    /**
      * Process a page of completed crimes and store in database
      */
     private static int processCompletedCrimesPage(Connection connection, String tableName, List<Crime> crimes,
@@ -515,10 +565,10 @@ public class GetCompletedData {
                     continue;
                 }
 
-                // Check if ANY usernames can be resolved for this crime
+                // Check if ANY usernames can be resolved for this crime (now checks across all factions)
                 boolean hasResolvableUsernames = hasAnyResolvableUsernames(crime, usernameMap);
                 if (!hasResolvableUsernames) {
-                    logger.debug("Skipping crime {} - no resolvable usernames found", crime.getId());
+                    logger.debug("Skipping crime {} - no resolvable usernames found across any faction", crime.getId());
                     continue;
                 }
 
@@ -545,10 +595,11 @@ public class GetCompletedData {
                             continue;
                         }
 
-                        // Only process users whose names we can resolve
+                        // Only process users whose names we can resolve (now from any faction)
                         String username = usernameMap.get(user.getId());
                         if (username == null) {
-                            logger.debug("Skipping user {} in crime {} - username not resolvable", user.getId(), crime.getId());
+                            logger.debug("Skipping user {} in crime {} - username not resolvable across any faction",
+                                    user.getId(), crime.getId());
                             continue;
                         }
 
@@ -596,6 +647,30 @@ public class GetCompletedData {
         }
 
         return recordsInserted;
+    }
+
+    /**
+     * Check if ANY users in a crime can be resolved to usernames across all factions
+     */
+    private static boolean hasAnyResolvableUsernames(Crime crime, Map<Long, String> usernameMap) {
+        if (crime.getSlots() == null || crime.getSlots().isEmpty()) {
+            return false; // No users at all
+        }
+
+        for (Slot slot : crime.getSlots()) {
+            SlotUser user = slot.getUser();
+            if (user != null && user.getId() != null) {
+                // Check if username exists in our cross-faction map
+                if (usernameMap.containsKey(user.getId())) {
+                    logger.debug("Crime {} has resolvable user: {} (found in cross-faction lookup)",
+                            crime.getId(), user.getId());
+                    return true; // At least one username can be resolved across all factions
+                }
+            }
+        }
+
+        logger.debug("Crime {} has no resolvable usernames across any faction", crime.getId());
+        return false; // No usernames can be resolved across any faction
     }
 
     /**
@@ -828,27 +903,6 @@ public class GetCompletedData {
 
             logger.debug("Rewards table {} created or verified with indexes", tableName);
         }
-    }
-
-    /**
-     * Check if ANY users in a crime can be resolved to usernames
-     */
-    private static boolean hasAnyResolvableUsernames(Crime crime, Map<Long, String> usernameMap) {
-        if (crime.getSlots() == null || crime.getSlots().isEmpty()) {
-            return false; // No users at all
-        }
-
-        for (Slot slot : crime.getSlots()) {
-            SlotUser user = slot.getUser();
-            if (user != null && user.getId() != null) {
-                // Check if username exists in our map
-                if (usernameMap.containsKey(user.getId())) {
-                    return true; // At least one username can be resolved
-                }
-            }
-        }
-
-        return false; // No usernames can be resolved
     }
 
     /**

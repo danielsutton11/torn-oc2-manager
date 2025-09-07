@@ -11,9 +11,9 @@ import static com.Torn.FactionCrimes.AllCrimes.GetAllOc2CrimesData.fetchAndProce
 import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProcessAllAvailableCrimes;
 import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
-import static com.Torn.FactionMembers.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
+import static com.Torn.FactionCrimes.Available.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
-import static com.Torn.FactionMembers.UpdateMemberCPR.updateAllFactionsCPR;
+import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
 
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
@@ -40,38 +40,56 @@ public class Execute {
 
         try {
             switch (jobCode) {
+
+                case Constants.JOB_RUN_ALL_SETUP_JOBS:
+                    if(getExecute()){
+                        logger.info("Running All Set Up Jobs");
+                        Validate();
+                        syncFactionMembers();
+                        fetchAndProcessAllCompletedCrimes();
+                        fetchAndProcessAllOC2Crimes();
+                        fetchAndProcessAllPaidCrimes();
+                        updateAllFactionsCPR();
+                    }else{
+                        logger.info("Skipping All Set Up Jobs, set execute environment variable to true to run");
+                    }
+                    break;
+
+
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
-                    break; //DONE
-                case Constants.JOB_GET_ALL_OC_CRIMES:
-                    logger.info("Running Get All OC Data job");
-                    fetchAndProcessAllOC2Crimes();
                     break; //DONE
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");
                     syncFactionMembers();
                     break; //DONE
-                case Constants.JOB_UPDATE_OVERVIEW_DATA:
-                    logger.info("Running overview data update job");
-                    // Add your implementation
-                    break;
                 case Constants.JOB_UPDATE_COMPLETED_DATA:
                     logger.info("Running completed data update job");
                     fetchAndProcessAllCompletedCrimes(); //TESTING
                     break;
-                case Constants.JOB_CHECK_USER_ITEMS:
-                    logger.info("Running user items check job");
-                    // Add your implementation
-                    break;
+                case Constants.JOB_GET_ALL_OC_CRIMES:
+                    logger.info("Running Get All OC Data job");
+                    fetchAndProcessAllOC2Crimes();
+                    break; //DONE
                 case Constants.JOB_UPDATE_CRIMES_PAID_DATA:
                     logger.info("Running paid crimes data update job");
                     fetchAndProcessAllPaidCrimes();
                     break; //DONE
                 case Constants.JOB_UPDATE_UPDATE_CPR_DATA:
-                    logger.info("Running paid crimes data update job");
+                    logger.info("Running update CPR job");
                     updateAllFactionsCPR();
                     break; //DONE
+
+
+                case Constants.JOB_UPDATE_OVERVIEW_DATA:
+                    logger.info("Running overview data update job");
+                    // Add your implementation
+                    break;
+                case Constants.JOB_CHECK_USER_ITEMS:
+                    logger.info("Running user items check job");
+                    // Add your implementation
+                    break;
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
@@ -98,10 +116,14 @@ public class Execute {
     }
 
     private static String getJobCode() {
-        String jobCode = System.getenv("Execute_Job");
+        String jobCode = System.getenv(Constants.EXECUTE_JOB);
         return (jobCode != null && !jobCode.isEmpty()) ? jobCode : null;
     }
 
+    private static boolean getExecute() {
+        String executeCode = System.getenv(Constants.EXECUTE);
+        return "true".equalsIgnoreCase(executeCode);
+    }
     /**
      * Clean up resources before application exit
      */

@@ -2,7 +2,11 @@ package com.Torn.Helpers;
 
 public class Constants {
 
+    public static final String EXECUTE_JOB = "Execute_Job";
+    public static final String EXECUTE = "Execute";
+
     //RAILWAY VARIABLE NAMES
+    public static final String JOB_RUN_ALL_SETUP_JOBS = "RUN_ALL_SETUP_JOBS";
     public static final String JOB_VALIDATE_API_KEYS = "VALIDATE_KEYS";
     public static final String JOB_GET_FACTION_MEMBERS = "FACTION_MEMBERS";
     public static final String JOB_GET_ALL_OC_CRIMES = "GET_ALL_OC2_CRIMES";
