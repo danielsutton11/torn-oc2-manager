@@ -546,12 +546,13 @@ public class GetCompletedData {
 
         // Use UPSERT for both initial and incremental to handle any overlaps
         String insertSql = "INSERT INTO " + tableName + " (" +
-                "crime_id, faction_id, crime_name, difficulty, success, completed_at, completed_date_friendly, " +
-                "user_id, username, role, outcome, checkpoint_pass_rate, last_updated) " +
+                "crime_id, faction_id, crime_name, difficulty, success, completed_at, " +
+                "user_id, username, role, outcome, checkpoint_pass_rate, joined_at, last_updated) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) " +
                 "ON CONFLICT (crime_id, user_id) DO UPDATE SET " +
                 "username = EXCLUDED.username, role = EXCLUDED.role, outcome = EXCLUDED.outcome, " +
-                "checkpoint_pass_rate = EXCLUDED.checkpoint_pass_rate, last_updated = CURRENT_TIMESTAMP";
+                "checkpoint_pass_rate = EXCLUDED.checkpoint_pass_rate, joined_at = EXCLUDED.joined_at, " +
+                "last_updated = CURRENT_TIMESTAMP";
 
         String rewardsTableName = Constants.TABLE_NAME_REWARDS_CRIMES + factionInfo.getDbSuffix();
         createRewardsTableIfNotExists(connection, rewardsTableName);
@@ -572,9 +573,8 @@ public class GetCompletedData {
                     continue;
                 }
 
-                // Determine crime success and format date
+                // Determine crime success
                 boolean crimeSuccess = determineCrimeSuccess(crime);
-                String completedDateFriendly = formatFriendlyDate(crime.getExecutedAt());
 
                 // Track if we'll be inserting any records for this crime
                 boolean willInsertCrimeRecords = false;
@@ -621,16 +621,17 @@ public class GetCompletedData {
                         pstmt.setObject(4, crime.getDifficulty());
                         pstmt.setBoolean(5, crimeSuccess);
                         pstmt.setTimestamp(6, timestampFromEpoch(crime.getExecutedAt()));
-                        pstmt.setString(7, completedDateFriendly);
-                        pstmt.setLong(8, user.getId());
-                        pstmt.setString(9, username);
-                        pstmt.setString(10, finalRole);
-                        pstmt.setString(11, user.getOutcome());
+                        pstmt.setLong(7, user.getId());
+                        pstmt.setString(8, username);
+                        pstmt.setString(9, finalRole);
+                        pstmt.setString(10, user.getOutcome());
                         if (checkpointPassRate != null) {
-                            pstmt.setInt(12, checkpointPassRate);
+                            pstmt.setInt(11, checkpointPassRate);
                         } else {
-                            pstmt.setNull(12, java.sql.Types.INTEGER);
+                            pstmt.setNull(11, java.sql.Types.INTEGER);
                         }
+                        // Add joined_at timestamp
+                        pstmt.setTimestamp(12, timestampFromEpoch(user.getJoinedAt()));
 
                         pstmt.addBatch();
                         recordsInserted++;
@@ -639,7 +640,7 @@ public class GetCompletedData {
 
                 // Process rewards if crime was successful and we're inserting records for it
                 if (crimeSuccess && willInsertCrimeRecords && crime.getRewards() != null) {
-                    processRewards(connection, rewardsTableName, crime, factionIdLong, completedDateFriendly, factionInfo.getApiKey());
+                    processRewards(connection, rewardsTableName, crime, factionIdLong, factionInfo.getApiKey());
                 }
             }
 
@@ -677,7 +678,7 @@ public class GetCompletedData {
      * Process and store rewards data for a successful crime
      */
     private static void processRewards(Connection connection, String rewardsTableName, Crime crime,
-                                       Long factionIdLong, String completedDateFriendly, String apiKey) {
+                                       Long factionIdLong, String apiKey) {
         try {
             // Parse rewards from Crime object
             if (!(crime.getRewards() instanceof Map)) {
@@ -741,6 +742,9 @@ public class GetCompletedData {
                 crimeValue += totalItemValue;
             }
 
+            // Format completed date for rewards table consistency
+            String completedDateFriendly = formatFriendlyDate(crime.getExecutedAt());
+
             // Use UPSERT for rewards as well
             String insertRewardsSql = "INSERT INTO " + rewardsTableName + " (" +
                     "crime_id, faction_id, crime_name, total_members_required, total_success_value, " +
@@ -775,6 +779,7 @@ public class GetCompletedData {
             logger.error("Error processing rewards for crime {}: {}", crime.getId(), e.getMessage(), e);
         }
     }
+
 
     /**
      * Data holder for item market information
@@ -929,7 +934,7 @@ public class GetCompletedData {
     }
 
     /**
-     * Create completed crimes table with correct column name
+     * Create completed crimes table with updated schema (removed completed_date_friendly, added joined_at)
      */
     private static void createCompletedCrimesTableIfNotExists(Connection connection, String tableName) throws SQLException {
         String createTableSql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
@@ -939,12 +944,12 @@ public class GetCompletedData {
                 "difficulty INTEGER," +
                 "success BOOLEAN NOT NULL," +
                 "completed_at TIMESTAMP," +
-                "completed_date_friendly VARCHAR(50)," +
                 "user_id BIGINT NOT NULL," +
                 "username VARCHAR(100) NOT NULL," +
                 "role VARCHAR(100) NOT NULL," +
                 "outcome VARCHAR(50)," +
                 "checkpoint_pass_rate INTEGER," +
+                "joined_at TIMESTAMP," +
                 "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "PRIMARY KEY (crime_id, user_id)" +
                 ")";
@@ -958,6 +963,7 @@ public class GetCompletedData {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_success ON " + tableName + "(success)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_user_id ON " + tableName + "(user_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_crime_name ON " + tableName + "(crime_name)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_joined_at ON " + tableName + "(joined_at DESC)");
 
             logger.debug("Table {} created or verified with indexes", tableName);
         }

@@ -1,10 +1,14 @@
 package com.Torn;
 
 import com.Torn.Helpers.Constants;
+import com.Torn.Helpers.TableCleanupUtility;
 import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+
+import java.io.IOException;
+import java.sql.SQLException;
 
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionCrimes.AllCrimes.GetAllOc2CrimesData.fetchAndProcessAllOC2Crimes;
@@ -14,6 +18,8 @@ import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcess
 import static com.Torn.FactionCrimes.Available.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
+import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
+import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
@@ -40,21 +46,15 @@ public class Execute {
 
         try {
             switch (jobCode) {
-
                 case Constants.JOB_RUN_ALL_SETUP_JOBS:
                     if(getExecute()){
-                        logger.info("Running All Set Up Jobs");
-                        Validate();
-                        syncFactionMembers();
-                        fetchAndProcessAllCompletedCrimes();
-                        fetchAndProcessAllOC2Crimes();
-                        fetchAndProcessAllPaidCrimes();
-                        updateAllFactionsCPR();
+
+
+
                     }else{
                         logger.info("Skipping All Set Up Jobs, set execute environment variable to true to run");
                     }
                     break;
-
 
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
@@ -112,6 +112,52 @@ public class Execute {
             logger.error("Job {} failed", jobCode, e);
             cleanup(); // Clean up before error exit
             System.exit(1);
+        }
+    }
+
+    private static void runAllJobs() throws SQLException, IOException {
+        logger.warn("==========================================");
+        logger.warn("DANGER: About to delete ALL faction tables!");
+        logger.warn("==========================================");
+
+        // Show what would be deleted
+        try {
+            TableCleanupUtility.TableCleanupSummary summary = getTableCleanupSummary();
+            logger.warn("Tables that will be deleted:");
+            logger.warn("  OC_DATA database: {} tables", summary.ocDataTables.size());
+            for (String table : summary.ocDataTables) {
+                logger.warn("    - {}", table);
+            }
+            logger.warn("  CONFIG database: {} tables", summary.configTables.size());
+            for (String table : summary.configTables) {
+                logger.warn("    - {}", table);
+            }
+            logger.warn("  Total: {} tables will be deleted", summary.totalTables);
+
+            // Only proceed if execute flag is set to true
+            if (getExecute()) {
+                logger.warn("Execute flag is TRUE - proceeding with table deletion...");
+                deleteAllTables();
+                logger.info("All tables deleted successfully");
+
+                logger.warn("==========================================");
+                logger.info("Running All Set Up Jobs");
+                logger.warn("==========================================");
+                Validate();
+                syncFactionMembers();
+                fetchAndProcessAllCompletedCrimes();
+                fetchAndProcessAllOC2Crimes();
+                fetchAndProcessAllPaidCrimes();
+                updateAllFactionsCPR();
+
+            } else {
+                logger.info("Execute flag is FALSE - skipping table deletion (this was a dry run)");
+                logger.info("Set the 'Execute' environment variable to 'true' to actually delete the tables");
+            }
+
+        } catch (Exception e) {
+            logger.error("Error during table cleanup operation", e);
+            throw e;
         }
     }
 

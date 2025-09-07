@@ -44,15 +44,20 @@ public class Constants {
 
     public static final String COLUMN_NAME_USER_ID = "user_id";
     public static final String COLUMN_NAME_USER_NAME = "username";
-
     public static final String COLUMN_NAME_CRIME_ID = "crime_id";
     public static final String COLUMN_NAME_CRIME_NAME = "crime_name";
     public static final String COLUMN_NAME_CRIME_VALUE = "crime_value";
 
     public static final String TABLE_NAME_FACTION_MEMBERS = "members_";
+    public static final String TABLE_NAME_OC2_CRIMES = "all_oc2_crimes";
+    public static final String TABLE_NAME_OC2_CRIMES_SLOTS = "all_oc2_crimes_slots";
+
+
+    public static final String TABLE_NAME_AVAILABLE_CRIMES = "a_crimes_";
     public static final String TABLE_NAME_AVAILABLE_MEMBERS = "a_members_";
     public static final String TABLE_NAME_COMPLETED_CRIMES = "c_crimes_";
     public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
+    public static final String TABLE_NAME_CPR = "cpr_";
 
     //CRIME STATUSES
     public static final String AVAILABLE = "available";
