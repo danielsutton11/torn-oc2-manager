@@ -16,9 +16,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-
-//TODO: This has been tested and is working! :) 
-
 public class ValidateApiKeys {
 
     private static final Logger logger = LoggerFactory.getLogger(ValidateApiKeys.class);

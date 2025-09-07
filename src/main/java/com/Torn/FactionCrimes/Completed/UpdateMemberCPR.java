@@ -161,17 +161,17 @@ public class UpdateMemberCPR {
                             crimeSlots, crimeRoleGroups, factions);
 
                     if (success) {
-                        logger.info("✓ Successfully updated CPR for faction {}", factionInfo.getFactionId());
+                        logger.info("Successfully updated CPR for faction {}", factionInfo.getFactionId());
                         successfulCount++;
                     } else {
-                        logger.error("✗ Failed to update CPR for faction {}", factionInfo.getFactionId());
+                        logger.error("Failed to update CPR for faction {}", factionInfo.getFactionId());
                         failedCount++;
                     }
 
                     processedCount++;
 
                 } catch (Exception e) {
-                    logger.error("✗ Unexpected error updating CPR for faction {}: {}",
+                    logger.error("Unexpected error updating CPR for faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                     failedCount++;
                 }

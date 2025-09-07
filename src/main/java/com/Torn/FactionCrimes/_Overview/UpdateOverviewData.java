@@ -834,6 +834,25 @@ public class UpdateOverviewData {
     private static void insertOverviewRecords(Connection ocDataConnection, String tableName,
                                               List<OverviewRecord> records) throws SQLException {
 
+        if (records.isEmpty()) {
+            logger.debug("No records to insert into overview table {}", tableName);
+            return;
+        }
+
+        // Sort records according to specified criteria
+        List<OverviewRecord> sortedRecords = records.stream()
+                .sorted(Comparator
+                        // First: Status priority (Planning, Recruiting, then others/null)
+                        .comparing((OverviewRecord r) -> getStatusSortPriority(r.getCrimeStatus()))
+                        // Second: Crime completion date ascending (nulls last)
+                        .thenComparing(OverviewRecord::getCrimeCompletionDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                        // Third: Checkpoint pass rate descending (nulls last)
+                        .thenComparing(OverviewRecord::getCheckpointPassRate, Comparator.nullsLast(Comparator.reverseOrder()))
+                        // Fourth: Username for consistent ordering
+                        .thenComparing(OverviewRecord::getUsername)
+                )
+                .collect(Collectors.toList());
+
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "user_id, username, user_in_discord, in_organised_crime, crime_id, crime_name, crime_status, " +
                 "crime_difficulty, role, checkpoint_pass_rate, item_required, item_is_reusable, " +
@@ -842,7 +861,7 @@ public class UpdateOverviewData {
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
-            for (OverviewRecord record : records) {
+            for (OverviewRecord record : sortedRecords) {
                 pstmt.setString(1, record.getUserId());
                 pstmt.setString(2, record.getUsername());
                 pstmt.setBoolean(3, record.isUserInDiscord());
@@ -906,10 +925,22 @@ public class UpdateOverviewData {
             }
 
             int[] results = pstmt.executeBatch();
-            logger.debug("Inserted {} overview records into table {}", results.length, tableName);
+            logger.debug("Inserted {} sorted overview records into table {}", results.length, tableName);
         }
     }
 
+    /**
+     * Helper method to determine sort priority for crime status
+     */
+    private static int getStatusSortPriority(String status) {
+        if (Constants.PLANNING.equalsIgnoreCase(status)) {
+            return 1;
+        } else if (Constants.RECRUITING.equalsIgnoreCase(status)) {
+            return 2;
+        } else {
+            return 3; // All other statuses (including null) come last
+        }
+    }
     /**
      * Send Discord notifications for users who joined crimes with items they have
      * PLACEHOLDER - Implementation to be completed later

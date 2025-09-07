@@ -80,7 +80,7 @@ public class Execute {
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     logger.info("Running overview data update job");
                     updateAllFactionsOverviewData();
-                    break;
+                    break; //TESTING
 
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
