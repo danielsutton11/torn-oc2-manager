@@ -353,7 +353,7 @@ public class UpdateMemberCPR {
 
         for (CrimeSlotInfo crimeSlot : crimeSlots) {
             String columnName = sanitizeColumnName(crimeSlot.getColumnName());
-            createSql.append("\"").append(columnName).append("\" INTEGER DEFAULT 0,");
+            createSql.append("\"").append(columnName).append("\" INTEGER DEFAULT NULL,");  // Changed from DEFAULT 0 to DEFAULT NULL
         }
 
         createSql.append("last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
@@ -365,7 +365,7 @@ public class UpdateMemberCPR {
             logger.debug("Dropped existing table {}", tableName);
 
             stmt.execute(createSql.toString());
-            logger.debug("Created CPR table {} with {} crime-slot columns", tableName, crimeSlots.size());
+            logger.debug("Created CPR table {} with {} crime-slot columns (defaulting to NULL)", tableName, crimeSlots.size());
 
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_faction_id ON " + tableName + "(faction_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_username ON " + tableName + "(username)");
