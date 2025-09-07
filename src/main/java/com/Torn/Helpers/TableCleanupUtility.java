@@ -78,7 +78,8 @@ public class TableCleanupUtility {
                 Constants.TABLE_NAME_AVAILABLE_MEMBERS,    // Available members
                 Constants.TABLE_NAME_COMPLETED_CRIMES,     // Completed crimes
                 Constants.TABLE_NAME_REWARDS_CRIMES,     // Rewards crimes
-                Constants.TABLE_NAME_CPR          // CPR tables
+                Constants.TABLE_NAME_CPR,          // CPR tables
+                Constants.TABLE_NAME_OVERVIEW              // Overview tables
         };
 
         try (Statement stmt = ocDataConnection.createStatement()) {
@@ -212,7 +213,7 @@ public class TableCleanupUtility {
 
             // Delete from OC_DATA database
             String[] ocDataPrefixes = {Constants.TABLE_NAME_AVAILABLE_CRIMES, Constants.TABLE_NAME_AVAILABLE_MEMBERS,
-                    Constants.TABLE_NAME_COMPLETED_CRIMES, Constants.TABLE_NAME_REWARDS_CRIMES, Constants.TABLE_NAME_CPR};
+                    Constants.TABLE_NAME_COMPLETED_CRIMES, Constants.TABLE_NAME_REWARDS_CRIMES, Constants.TABLE_NAME_CPR, Constants.TABLE_NAME_OVERVIEW};
 
             try (Statement stmt = ocDataConnection.createStatement()) {
                 for (String prefix : ocDataPrefixes) {
@@ -275,7 +276,7 @@ public class TableCleanupUtility {
 
             // Calculate tables to be deleted from OC_DATA
             String[] ocDataPrefixes = {Constants.TABLE_NAME_AVAILABLE_CRIMES, Constants.TABLE_NAME_AVAILABLE_MEMBERS,
-                    Constants.TABLE_NAME_COMPLETED_CRIMES, Constants.TABLE_NAME_REWARDS_CRIMES, Constants.TABLE_NAME_CPR};
+                    Constants.TABLE_NAME_COMPLETED_CRIMES, Constants.TABLE_NAME_REWARDS_CRIMES, Constants.TABLE_NAME_CPR, Constants.TABLE_NAME_OVERVIEW};
             for (String factionSuffix : factionSuffixes) {
                 for (String prefix : ocDataPrefixes) {
                     summary.ocDataTables.add(prefix + factionSuffix);

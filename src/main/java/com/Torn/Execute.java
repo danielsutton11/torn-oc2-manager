@@ -16,6 +16,7 @@ import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProces
 import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
 import static com.Torn.FactionCrimes.Available.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
+import static com.Torn.FactionCrimes._Overview.UpdateOverviewData.updateAllFactionsOverviewData;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
 import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
@@ -47,13 +48,7 @@ public class Execute {
         try {
             switch (jobCode) {
                 case Constants.JOB_RUN_ALL_SETUP_JOBS:
-                    if(getExecute()){
-
-
-
-                    }else{
-                        logger.info("Skipping All Set Up Jobs, set execute environment variable to true to run");
-                    }
+                    runAllJobs();
                     break;
 
                 case Constants.JOB_VALIDATE_API_KEYS:
@@ -84,8 +79,9 @@ public class Execute {
 
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     logger.info("Running overview data update job");
-                    // Add your implementation
+                    updateAllFactionsOverviewData();
                     break;
+
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
                     // Add your implementation
@@ -147,6 +143,7 @@ public class Execute {
                 syncFactionMembers();
                 fetchAndProcessAllCompletedCrimes();
                 fetchAndProcessAllOC2Crimes();
+                updateAllFactionsOverviewData();
                 fetchAndProcessAllPaidCrimes();
                 updateAllFactionsCPR();
 

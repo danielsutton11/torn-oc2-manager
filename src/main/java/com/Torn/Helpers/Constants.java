@@ -47,6 +47,18 @@ public class Constants {
     public static final String COLUMN_NAME_CRIME_ID = "crime_id";
     public static final String COLUMN_NAME_CRIME_NAME = "crime_name";
     public static final String COLUMN_NAME_CRIME_VALUE = "crime_value";
+    public static final String COLUMN_NAME_USER_IN_DISCORD = "user_in_discord";
+    public static final String COLUMN_NAME_IN_ORGANISED_CRIME = "in_organised_crime";
+    public static final String COLUMN_NAME_CRIME_STATUS = "crime_status";
+    public static final String COLUMN_NAME_CRIME_DIFFICULTY = "crime_difficulty";
+    public static final String COLUMN_NAME_ROLE = "role";
+    public static final String COLUMN_NAME_CHECKPOINT_PASS_RATE = "checkpoint_pass_rate";
+    public static final String COLUMN_NAME_ITEM_REQUIRED = "item_required";
+    public static final String COLUMN_NAME_ITEM_IS_REUSABLE = "item_is_reusable";
+    public static final String COLUMN_NAME_USER_HAS_ITEM = "user_has_item";
+    public static final String COLUMN_NAME_CRIME_HAS_ALL_MEMBERS = "crime_has_all_members";
+    public static final String COLUMN_NAME_CRIME_COMPLETION_DATE = "crime_completion_date";
+    public static final String COLUMN_NAME_ITEM_AVERAGE_PRICE = "item_average_price";
 
     public static final String TABLE_NAME_FACTION_MEMBERS = "members_";
     public static final String TABLE_NAME_OC2_CRIMES = "all_oc2_crimes";
@@ -58,6 +70,7 @@ public class Constants {
     public static final String TABLE_NAME_COMPLETED_CRIMES = "c_crimes_";
     public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
     public static final String TABLE_NAME_CPR = "cpr_";
+    public static final String TABLE_NAME_OVERVIEW = "overview_";
 
     //CRIME STATUSES
     public static final String AVAILABLE = "available";
