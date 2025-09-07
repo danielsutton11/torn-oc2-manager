@@ -118,7 +118,8 @@ public class TableCleanupUtility {
             // Delete static OC2 tables first
             String[] staticTables = {
                     Constants.TABLE_NAME_OC2_CRIMES,
-                    Constants.TABLE_NAME_OC2_CRIMES_SLOTS
+                    Constants.TABLE_NAME_OC2_CRIMES_SLOTS,
+                    Constants.TABLE_NAME_OC2_ITEMS
             };
 
             for (String tableName : staticTables) {
@@ -286,6 +287,7 @@ public class TableCleanupUtility {
             // Calculate tables to be deleted from CONFIG
             summary.configTables.add(Constants.TABLE_NAME_OC2_CRIMES);
             summary.configTables.add(Constants.TABLE_NAME_OC2_CRIMES_SLOTS);
+            summary.configTables.add(Constants.TABLE_NAME_OC2_ITEMS);
             for (String factionSuffix : factionSuffixes) {
                 summary.configTables.add(Constants.TABLE_NAME_FACTION_MEMBERS + factionSuffix);
             }

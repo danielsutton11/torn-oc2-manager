@@ -12,11 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -78,6 +74,29 @@ public class GetAllOc2CrimesData {
         public String getRequiredItemName() { return requiredItemName; }
         public boolean isReusable() { return isReusable; }
         public Integer getAveragePrice() { return averagePrice; }
+    }
+
+    public static class OC2ItemData {
+        private final String crimeName;
+        private final String itemName;
+        private final boolean isReusable;
+        private final Integer averagePrice;
+        private final boolean shouldBeTransferred;
+
+        public OC2ItemData(String crimeName, String itemName, boolean isReusable,
+                           Integer averagePrice, boolean shouldBeTransferred) {
+            this.crimeName = crimeName;
+            this.itemName = itemName;
+            this.isReusable = isReusable;
+            this.averagePrice = averagePrice;
+            this.shouldBeTransferred = shouldBeTransferred;
+        }
+
+        public String getCrimeName() { return crimeName; }
+        public String getItemName() { return itemName; }
+        public boolean isReusable() { return isReusable; }
+        public Integer getAveragePrice() { return averagePrice; }
+        public boolean shouldBeTransferred() { return shouldBeTransferred; }
     }
 
     public static class RewardsRange {
@@ -367,7 +386,7 @@ public class GetAllOc2CrimesData {
     }
 
     /**
-     * Create the two OC2 crimes tables if they don't exist
+     * Create the three OC2 crimes tables if they don't exist
      */
     private static void createOC2CrimesTablesIfNotExists(Connection connection) throws SQLException {
         // Create all_oc2_crimes table
@@ -397,15 +416,33 @@ public class GetAllOc2CrimesData {
                 "PRIMARY KEY (crime_name)" +
                 ")";
 
+        // CREATE NEW ITEMS TABLE
+        String createItemsTableSql = "CREATE TABLE IF NOT EXISTS " + Constants.TABLE_NAME_OC2_ITEMS + " (" +
+                "id SERIAL PRIMARY KEY," +
+                "crime_name VARCHAR(255) NOT NULL," +
+                "item_name VARCHAR(255) NOT NULL," +
+                "is_reusable BOOLEAN NOT NULL," +
+                "average_price INTEGER," +
+                "should_be_transferred BOOLEAN NOT NULL DEFAULT FALSE," +
+                "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "UNIQUE(crime_name, item_name)" +
+                ")";
+
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createCrimesTableSql);
             stmt.execute(createSlotsTableSql);
+            stmt.execute(createItemsTableSql); // ADD THIS LINE
 
-            // Create indexes for better performance
+            // Create indexes for existing tables (existing code)
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_all_oc2_crimes_difficulty ON all_oc2_crimes(difficulty)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_all_oc2_crimes_scope_cost ON all_oc2_crimes(scope_cost)");
 
-            logger.info("OC2 crimes tables created or verified successfully");
+            // CREATE INDEXES FOR NEW ITEMS TABLE
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + Constants.TABLE_NAME_OC2_ITEMS + "_crime_name ON " + Constants.TABLE_NAME_OC2_ITEMS + "(crime_name)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + Constants.TABLE_NAME_OC2_ITEMS + "_is_reusable ON " + Constants.TABLE_NAME_OC2_ITEMS + "(is_reusable)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + Constants.TABLE_NAME_OC2_ITEMS + "_should_be_transferred ON " + Constants.TABLE_NAME_OC2_ITEMS + "(should_be_transferred)");
+
+            logger.info("OC2 crimes and items tables created or verified successfully");
         }
     }
 
@@ -420,23 +457,33 @@ public class GetAllOc2CrimesData {
         try {
             clearExistingOC2Data(configConnection);
 
+            // Collect all items while processing crimes
+            List<OC2ItemData> allItems = new ArrayList<>();
+
             for (OC2Crime crime : crimes) {
-                // Calculate costs
+                // Calculate costs (existing code)
                 long totalItemCost = calculateTotalItemCost(crime.getSlots());
                 long nonReusableCost = calculateNonReusableCost(crime.getSlots());
 
-                // Get rewards range from OC data database
+                // Get rewards range from OC data database (existing code)
                 RewardsRange rewardsRange = getRewardsRange(configConnection, ocDataConnection, crime.getName());
 
-                // Insert into all_oc2_crimes table
+                // Insert into all_oc2_crimes table (existing code)
                 insertCrimeData(configConnection, crime, totalItemCost, nonReusableCost, rewardsRange);
 
-                // Insert into all_oc2_crimes_slots table
+                // Insert into all_oc2_crimes_slots table (existing code)
                 insertCrimeSlotsData(configConnection, crime);
+
+                // COLLECT ITEMS DATA
+                List<OC2ItemData> crimeItems = extractItemsFromCrime(crime);
+                allItems.addAll(crimeItems);
             }
 
+            // INSERT ALL ITEMS DATA
+            insertItemsData(configConnection, allItems);
+
             configConnection.commit();
-            logger.info("Successfully processed and stored {} crimes data", crimes.size());
+            logger.info("Successfully processed and stored {} crimes and {} items", crimes.size(), allItems.size());
 
         } catch (SQLException e) {
             configConnection.rollback();
@@ -448,13 +495,91 @@ public class GetAllOc2CrimesData {
     }
 
     /**
+     * Extract items data from a single crime
+     */
+    private static List<OC2ItemData> extractItemsFromCrime(OC2Crime crime) {
+        List<OC2ItemData> items = new ArrayList<>();
+        Set<String> processedItems = new HashSet<>(); // Avoid duplicates
+
+        for (OC2Slot slot : crime.getSlots()) {
+            if (slot.getRequiredItemName() != null && !slot.getRequiredItemName().isEmpty()) {
+                String itemKey = crime.getName() + "|" + slot.getRequiredItemName();
+
+                if (!processedItems.contains(itemKey)) {
+                    processedItems.add(itemKey);
+
+                    boolean shouldBeTransferred = slot.isReusable() &&
+                            slot.getAveragePrice() != null &&
+                            slot.getAveragePrice() >= Constants.ITEM_TRANSFER_THRESHOLD;
+
+                    items.add(new OC2ItemData(
+                            crime.getName(),
+                            slot.getRequiredItemName(),
+                            slot.isReusable(),
+                            slot.getAveragePrice(),
+                            shouldBeTransferred
+                    ));
+                }
+            }
+        }
+
+        return items;
+    }
+
+    /**
+     * Insert items data into the all_oc2_items table
+     */
+    private static void insertItemsData(Connection connection, List<OC2ItemData> items) throws SQLException {
+        if (items.isEmpty()) {
+            logger.info("No items to insert");
+            return;
+        }
+
+        // Clear existing items data
+        String clearSql = "DELETE FROM " + Constants.TABLE_NAME_OC2_ITEMS;
+        try (PreparedStatement clearStmt = connection.prepareStatement(clearSql)) {
+            clearStmt.executeUpdate();
+            logger.debug("Cleared existing items data");
+        }
+
+        String insertSql = "INSERT INTO " + Constants.TABLE_NAME_OC2_ITEMS + " (" +
+                "crime_name, item_name, is_reusable, average_price, should_be_transferred, last_updated) " +
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(insertSql)) {
+            for (OC2ItemData item : items) {
+                pstmt.setString(1, item.getCrimeName());
+                pstmt.setString(2, item.getItemName());
+                pstmt.setBoolean(3, item.isReusable());
+
+                if (item.getAveragePrice() != null) {
+                    pstmt.setInt(4, item.getAveragePrice());
+                } else {
+                    pstmt.setNull(4, Types.INTEGER);
+                }
+
+                pstmt.setBoolean(5, item.shouldBeTransferred());
+                pstmt.addBatch();
+            }
+
+            int[] results = pstmt.executeBatch();
+            logger.info("Inserted {} items into {}", results.length, Constants.TABLE_NAME_OC2_ITEMS);
+
+            // Log items that should be transferred
+            long transferCount = items.stream().mapToLong(item -> item.shouldBeTransferred() ? 1 : 0).sum();
+            logger.info("Items marked for transfer: {} (value >= ${})", transferCount, Constants.ITEM_TRANSFER_THRESHOLD);
+        }
+    }
+
+    /**
      * Clear existing OC2 data from both tables
      */
     private static void clearExistingOC2Data(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
-            stmt.executeUpdate("DELETE FROM all_oc2_crimes");
-            stmt.executeUpdate("DELETE FROM all_oc2_crimes_slots");
-            logger.debug("Cleared existing OC2 data from both tables");
+            stmt.executeUpdate("DELETE FROM " +Constants.TABLE_NAME_OC2_CRIMES);
+            stmt.executeUpdate("DELETE FROM " + Constants.TABLE_NAME_OC2_CRIMES_SLOTS);
+            stmt.executeUpdate("DELETE FROM " + Constants.TABLE_NAME_OC2_ITEMS);
+            logger.debug("Cleared existing OC2 data from all tables");
         }
     }
 

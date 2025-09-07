@@ -42,6 +42,21 @@ public class Constants {
     public static final String COLUMN_NAME_DB_SUFFIX = "db_suffix";
     public static final String COLUMN_NAME_OWNER_NAME = "owner_name";
 
+    public static final String TABLE_NAME_OC2_ITEMS = "all_oc2_items";
+    // Global threshold for item transfer (you can adjust this value)
+    public static final int ITEM_TRANSFER_THRESHOLD = 1000000;
+
+    public static final String TABLE_NAME_FACTION_MEMBERS = "members_";
+    public static final String TABLE_NAME_OC2_CRIMES = "all_oc2_crimes";
+    public static final String TABLE_NAME_OC2_CRIMES_SLOTS = "all_oc2_crimes_slots";
+
+    public static final String TABLE_NAME_AVAILABLE_CRIMES = "a_crimes_";
+    public static final String TABLE_NAME_AVAILABLE_MEMBERS = "a_members_";
+    public static final String TABLE_NAME_COMPLETED_CRIMES = "c_crimes_";
+    public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
+    public static final String TABLE_NAME_CPR = "cpr_";
+    public static final String TABLE_NAME_OVERVIEW = "overview_";
+
     public static final String COLUMN_NAME_USER_ID = "user_id";
     public static final String COLUMN_NAME_USER_NAME = "username";
     public static final String COLUMN_NAME_CRIME_ID = "crime_id";
@@ -59,18 +74,6 @@ public class Constants {
     public static final String COLUMN_NAME_CRIME_HAS_ALL_MEMBERS = "crime_has_all_members";
     public static final String COLUMN_NAME_CRIME_COMPLETION_DATE = "crime_completion_date";
     public static final String COLUMN_NAME_ITEM_AVERAGE_PRICE = "item_average_price";
-
-    public static final String TABLE_NAME_FACTION_MEMBERS = "members_";
-    public static final String TABLE_NAME_OC2_CRIMES = "all_oc2_crimes";
-    public static final String TABLE_NAME_OC2_CRIMES_SLOTS = "all_oc2_crimes_slots";
-
-
-    public static final String TABLE_NAME_AVAILABLE_CRIMES = "a_crimes_";
-    public static final String TABLE_NAME_AVAILABLE_MEMBERS = "a_members_";
-    public static final String TABLE_NAME_COMPLETED_CRIMES = "c_crimes_";
-    public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
-    public static final String TABLE_NAME_CPR = "cpr_";
-    public static final String TABLE_NAME_OVERVIEW = "overview_";
 
     //CRIME STATUSES
     public static final String AVAILABLE = "available";
