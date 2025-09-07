@@ -253,8 +253,8 @@ public class UpdateMemberCPR {
         List<CrimeSlotInfo> crimeSlots = new ArrayList<>();
 
         String sql = "SELECT c.crime_name, s.slot_1, s.slot_2, s.slot_3, s.slot_4, s.slot_5, s.slot_6 " +
-                "FROM all_oc2_crimes c " +
-                "JOIN all_oc2_crimes_slots s ON c.crime_name = s.crime_name " +
+                "FROM " + Constants.TABLE_NAME_OC2_CRIMES + " c " +
+                "JOIN " + Constants.TABLE_NAME_OC2_CRIMES_SLOTS + " s ON c.crime_name = s.crime_name " +
                 "ORDER BY c.crime_name";
 
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql);

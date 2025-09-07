@@ -48,6 +48,7 @@ public class Constants {
     public static final String TABLE_NAME_OC2_ITEMS = "all_oc2_items";
     // Global threshold for item transfer (you can adjust this value)
     public static final int ITEM_TRANSFER_THRESHOLD = 1000000;
+    public static final String TABLE_NAME_DISCORD_ROLES_WEBHOOKS = "discord_roles_webhooks";
 
     public static final String TABLE_NAME_AVAILABLE_CRIMES = "a_crimes_";
     public static final String TABLE_NAME_AVAILABLE_MEMBERS = "a_members_";

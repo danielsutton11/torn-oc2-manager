@@ -701,7 +701,7 @@ public class GetAllOc2CrimesData {
      */
     private static void insertCrimeData(Connection connection, OC2Crime crime, long totalItemCost,
                                         long nonReusableCost, RewardsRange rewardsRange) throws SQLException {
-        String sql = "INSERT INTO all_oc2_crimes (" +
+        String sql = "INSERT INTO " + Constants.TABLE_NAME_OC2_CRIMES + " (" +
                 "crime_name, difficulty, scope_cost, scope_return, total_slots, " +
                 "total_item_cost, non_reusable_cost, rewards_value_low, rewards_value_high, " +
                 "last_updated) " +
@@ -737,7 +737,7 @@ public class GetAllOc2CrimesData {
      * Insert crime slots data into all_oc2_crimes_slots table
      */
     private static void insertCrimeSlotsData(Connection connection, OC2Crime crime) throws SQLException {
-        String sql = "INSERT INTO all_oc2_crimes_slots (" +
+        String sql = "INSERT INTO " + Constants.TABLE_NAME_OC2_CRIMES_SLOTS + " (" +
                 "crime_name, slot_1, slot_2, slot_3, slot_4, slot_5, slot_6, last_updated) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 

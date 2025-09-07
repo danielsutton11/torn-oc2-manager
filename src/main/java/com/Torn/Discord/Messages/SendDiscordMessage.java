@@ -243,7 +243,7 @@ public class SendDiscordMessage {
         }
 
         String sql = "SELECT faction_id, leadership_role_id, oc_manager_role_id, banker_role_id, webhook_organised_crimes " +
-                "FROM discord_roles_webhooks " +
+                "FROM " + Constants.TABLE_NAME_DISCORD_ROLES_WEBHOOKS + " " +
                 "WHERE faction_id = ?";
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger);
