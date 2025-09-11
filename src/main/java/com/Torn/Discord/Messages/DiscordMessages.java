@@ -84,12 +84,13 @@ public class DiscordMessages {
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💊 OC2 Xanax Withdrawal")
                 .setDescription(String.format(
-                        "The crime **%s has just rewarded **%s Xanax. Please withdraw as soon as possible.\n",
+                        "The crime **%s** has just rewarded **%s Xanax**. Please withdraw as soon as possible.\n",
                         crimeName, itemQuantity
                 ))
                 .setColor(Colors.ORANGE)
                 .addField("📋 Quick Actions",
-                        "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs) | ",
+                        "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
+                                "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
@@ -104,6 +105,7 @@ public class DiscordMessages {
         );
     }
 
+
     /**
      * Send crime has completed notification
      */
@@ -112,17 +114,18 @@ public class DiscordMessages {
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("✅ OC2 Crime Complete")
                 .setDescription(String.format(
-                        "The crime **%s has just completed successfully, please issue the payout as soon as possible.\n",
+                        "The crime **%s** has just completed successfully, please issue the payout as soon as possible.\n",
                         crimeName
                 ))
                 .setColor(Colors.GREEN)
                 .addField("📋 Quick Actions",
-                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes) | ",
+                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                                "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
-        // Send to Leadership
+        // Send to OC Manager
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.OC_MANAGER,
@@ -138,18 +141,19 @@ public class DiscordMessages {
     public static boolean sendNeedCrimesToSpawn(String factionId) {
 
         DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("✅ OC2 Crime Complete")
+                .setTitle("🚨 OC2 Crimes Needed")
                 .setDescription(
                         "There are currently insufficient organised crimes available, please spawn some more!\n"
                 )
                 .setColor(Colors.CYAN)
                 .addField("📋 Quick Actions",
-                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes) | ",
+                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                                "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
-        // Send to Leadership
+        // Send to OC Manager
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.OC_MANAGER,
@@ -210,7 +214,7 @@ public class DiscordMessages {
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
-        // Send to Leadership
+        // Send to Armourer
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.ARMOURER,

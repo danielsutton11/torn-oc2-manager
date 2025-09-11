@@ -29,6 +29,12 @@ import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
 import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
+//TODO:
+// Item usage logging - When we pay and when we buy for each faction
+// Sending all the other discord messages - Spawn crimes, xanax withdrawl, crimes completed
+// Work out who should join what crimes, create discord message for users to tell them which crime to join
+// Get CPR from tornstats and add into my existing tables
+
 @SpringBootApplication
 @EnableWebMvc
 public class Execute {

@@ -490,7 +490,7 @@ public class SendDiscordMessage {
 
         public DiscordEmbed addField(String name, String value, boolean inline) {
             Map<String, Object> field = new HashMap<>();
-            field.put("name", value);
+            field.put("name", name);
             field.put("value", value);
             field.put("inline", inline);
 
