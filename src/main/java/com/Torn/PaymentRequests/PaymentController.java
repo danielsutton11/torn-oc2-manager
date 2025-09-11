@@ -22,8 +22,8 @@ public class PaymentController {
      * Handle auto-fulfill link clicks - redirects to Torn payment page
      */
     @GetMapping("/claim/{requestId}")
-    public ResponseEntity<?> claimPayment(@PathVariable String requestId,
-                                          @RequestParam String userId) {
+    public ResponseEntity<?> claimPayment(@PathVariable("requestId") String requestId,
+                                          @RequestParam("userId") String userId) {
 
         logger.info("Payment claim request: {} by user: {}", requestId, userId);
 
@@ -80,8 +80,8 @@ public class PaymentController {
      * Handle manual fulfill link clicks - just claims the request
      */
     @GetMapping("/manual/{requestId}")
-    public ResponseEntity<?> claimManualPayment(@PathVariable String requestId,
-                                                @RequestParam(required = false) String userId) {
+    public ResponseEntity<?> claimManualPayment(@PathVariable("requestId") String requestId,
+                                                @RequestParam(value = "userId", required = false) String userId) {
 
         logger.info("Manual payment claim request: {} by user: {}", requestId, userId);
 
@@ -194,7 +194,7 @@ public class PaymentController {
         return error;
     }
 
-    @GetMapping("/payment/test")
+    @GetMapping("/test")
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> response = new HashMap<>();
         response.put("status", "healthy");
@@ -218,14 +218,5 @@ public class PaymentController {
 
         return ResponseEntity.ok(response);
     }
-
-    @GetMapping("/")
-    public ResponseEntity<String> root() {
-        return ResponseEntity.ok("OC2 Payment Service is running!");
-    }
-
-    @GetMapping("/health")
-    public ResponseEntity<String> simpleHealth() {
-        return ResponseEntity.ok("OK");
-    }
 }
+
