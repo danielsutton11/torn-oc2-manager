@@ -5,6 +5,8 @@ public class Constants {
     public static final String EXECUTE_JOB = "Execute_Job";
     public static final String EXECUTE = "Execute";
 
+    public static final String PAYMENT_SERVICE_BASE_URL = "PAYMENT_SERVICE_BASE_URL";
+
     //RAILWAY VARIABLE NAMES
     public static final String JOB_RUN_ALL_SETUP_JOBS = "RUN_ALL_SETUP_JOBS";
     public static final String JOB_VALIDATE_API_KEYS = "VALIDATE_KEYS";

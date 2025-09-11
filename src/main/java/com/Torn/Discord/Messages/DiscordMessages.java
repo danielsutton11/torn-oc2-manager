@@ -3,6 +3,8 @@ package com.Torn.Discord.Messages;
 import com.Torn.Discord.Messages.SendDiscordMessage.DiscordEmbed;
 import com.Torn.Discord.Messages.SendDiscordMessage.RoleType;
 import com.Torn.Discord.Messages.SendDiscordMessage.Colors;
+import com.Torn.Helpers.Constants;
+import org.apache.tomcat.util.bcel.Const;
 import org.jetbrains.annotations.NotNull;
 
 import java.text.DecimalFormat;
@@ -243,21 +245,24 @@ public class DiscordMessages {
     }
 
     public static String createPayUrl(String userId, long amount, String requestId){
-        // TODO: Replace with your actual web service domain
-        // For now, this is a placeholder URL structure
-        return "https://your-service-domain.com/payment/claim/" + requestId + "?userId=" + userId;
-
-        // Alternative: For development/testing, you could temporarily use the direct Torn URL
-        // return "https://www.torn.com/factions.php?step=your&type=1#/tab=controls&option=give-to-user&addMoneyTo=" +
-        //         userId + "&money=" + amount + "&ref=" + requestId;
+        String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
+        if (baseUrl == null) {
+            // Replace this with your actual Railway web service URL
+            baseUrl = "https://oc2-payment-service-dev.up.railway.app";
+        }
+        return baseUrl + "/payment/claim/" + requestId + "?userId=" + userId;
     }
 
     /**
      * Create manual payment URL for cases where auto-fulfill doesn't work
      */
     public static String createManualPayUrl(String requestId) {
-        // TODO: Replace with your actual web service domain
-        return "https://your-service-domain.com/payment/manual/" + requestId;
+        String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
+        if (baseUrl == null) {
+            // Replace this with your actual Railway web service URL
+            baseUrl = "https://oc2-payment-service-dev.up.railway.app";
+        }
+        return baseUrl + "/payment/manual/" + requestId;
     }
 
 

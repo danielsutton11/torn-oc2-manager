@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "java -jar target/torn-organised-crimes-manager.jar"
+restartPolicyType = "always"  # Keep web service running
+healthcheckPath = "/payment/test"
+healthcheckTimeout = 30
+
+[environments.production]
+# Don't set Execute_Job - this will run as web service
+variables = {}
