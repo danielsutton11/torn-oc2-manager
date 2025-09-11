@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
 
 import java.io.IOException;
@@ -28,6 +30,7 @@ import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
 @SpringBootApplication
+@EnableWebMvc
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
     public static final Postgres postgres = new Postgres();

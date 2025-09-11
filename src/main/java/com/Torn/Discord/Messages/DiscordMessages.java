@@ -247,7 +247,6 @@ public class DiscordMessages {
     public static String createPayUrl(String userId, long amount, String requestId){
         String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
         if (baseUrl == null) {
-            // Replace this with your actual Railway web service URL
             baseUrl = "https://oc2-payment-service-dev.up.railway.app";
         }
         return baseUrl + "/payment/claim/" + requestId + "?userId=" + userId;
@@ -259,7 +258,6 @@ public class DiscordMessages {
     public static String createManualPayUrl(String requestId) {
         String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
         if (baseUrl == null) {
-            // Replace this with your actual Railway web service URL
             baseUrl = "https://oc2-payment-service-dev.up.railway.app";
         }
         return baseUrl + "/payment/manual/" + requestId;

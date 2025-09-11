@@ -187,7 +187,7 @@ public class PaymentController {
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> response = new HashMap<>();
         response.put("status", "healthy");
-        response.put("service", "torn-payment-service");
+        response.put("service", "OC2 Payment Service");
         response.put("timestamp", System.currentTimeMillis());
         response.put("version", "1.0.0");
 
@@ -206,5 +206,15 @@ public class PaymentController {
         }
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/")
+    public ResponseEntity<String> root() {
+        return ResponseEntity.ok("OC2 Payment Service is running!");
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<String> simpleHealth() {
+        return ResponseEntity.ok("OK");
     }
 }
