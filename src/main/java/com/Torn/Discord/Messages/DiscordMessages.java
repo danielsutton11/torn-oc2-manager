@@ -10,32 +10,58 @@ import java.util.*;
 
 public class DiscordMessages {
 
+
     /**
-     * Send a user needs payment for an item notification
+     * Enhanced sendPayMemberForItem method with better messaging and manual option
      */
     public static boolean sendPayMemberForItem(String factionId,
-                                                       String playerName,
-                                                       String playerId,
-                                                       String requestId,
-                                                       String itemName,
-                                                       long amount) {
+                                               String playerName,
+                                               String playerId,
+                                               String requestId,
+                                               String itemName,
+                                               long amount) {
 
         DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("🏦 OC2 Item Payment #" + requestId)
+                .setTitle("💰 Payment Request #" + requestId.substring(0, 8) + "...")
                 .setDescription(String.format(
-                        "**%s [%s]** need's their balance increasing by **%s, as they already had **%s their inventory.\n",
-                        playerName, playerId, formatCurrency(amount), itemName
+                        "**%s [%s]** needs payment for an item they already have:\n\n" +
+                                "💎 **Item:** %s\n" +
+                                "💵 **Amount:** %s\n" +
+                                "⏰ **Expires:** 15 minutes after claimed\n",
+                        playerName, playerId, itemName, formatCurrency(amount)
                 ))
                 .setColor(Colors.BLUE)
-                .addField("📋 Quick Actions",
-                        "🔧 [**Fulfill**](" + createPayUrl(playerId,amount,requestId) +") | " +
-                        "💲 [**Manually Fulfill**](https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user) | ",
+                .addField("🔧 Quick Actions",
+                        "[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
+                                "Automatically opens Torn payment page\n\n" +
+                                "[**Manual Fulfill**](" + createManualPayUrl(requestId) + ") - " +
+                                "Claim request for manual payment\n\n" +
+                                "[**Torn Payment Page**](https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user) - " +
+                                "Direct link to faction controls",
                         false)
-                .addField("ℹ️ Request Details",
-                        String.format("**Request ID:** %s\n**Player:** %s [%s]\n**Amount:** %s \n**Status:** Pending",
-                                requestId, playerName, playerId, amount),
+                .addField("📋 Request Details",
+                        String.format(
+                                "**Request ID:** %s\n" +
+                                        "**Player:** %s [%s]\n" +
+                                        "**Amount:** %s\n" +
+                                        "**Item:** %s\n" +
+                                        "**Status:** ⏳ Pending\n" +
+                                        "**Crime ID:** %s",
+                                requestId.substring(0, 8) + "...",
+                                playerName,
+                                playerId,
+                                formatCurrency(amount),
+                                itemName,
+                                "N/A" // Could add crime ID if needed
+                        ),
                         true)
-                .setFooter("OC2 Management System", null)
+                .addField("ℹ️ Important Notes",
+                        "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
+                                "• Use **Manual Fulfill** if you prefer to pay manually\n" +
+                                "• Links become invalid once claimed by someone\n" +
+                                "• Unclaimed requests reset after 15 minutes",
+                        false)
+                .setFooter("OC2 Payment System • Request expires 15 minutes after being claimed", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
         // Send to bankers with custom username
@@ -44,7 +70,7 @@ public class DiscordMessages {
                 RoleType.BANKER,
                 null, // No additional text message
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Payment Manager" // Custom bot name
         );
     }
 
@@ -217,8 +243,21 @@ public class DiscordMessages {
     }
 
     public static String createPayUrl(String userId, long amount, String requestId){
-        return "https://www.torn.com/factions.php?step=your&type=1#/tab=controls&option=give-to-user&addMoneyTo=" +
-                userId + "&money=" + amount;
+        // TODO: Replace with your actual web service domain
+        // For now, this is a placeholder URL structure
+        return "https://your-service-domain.com/payment/claim/" + requestId + "?userId=" + userId;
+
+        // Alternative: For development/testing, you could temporarily use the direct Torn URL
+        // return "https://www.torn.com/factions.php?step=your&type=1#/tab=controls&option=give-to-user&addMoneyTo=" +
+        //         userId + "&money=" + amount + "&ref=" + requestId;
+    }
+
+    /**
+     * Create manual payment URL for cases where auto-fulfill doesn't work
+     */
+    public static String createManualPayUrl(String requestId) {
+        // TODO: Replace with your actual web service domain
+        return "https://your-service-domain.com/payment/manual/" + requestId;
     }
 
 

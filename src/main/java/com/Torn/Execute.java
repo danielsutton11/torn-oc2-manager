@@ -2,9 +2,13 @@ package com.Torn;
 
 import com.Torn.Helpers.Constants;
 import com.Torn.Helpers.TableCleanupUtility;
+import com.Torn.PaymentRequests.PaymentVerificationService;
 import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 
 import java.io.IOException;
@@ -21,7 +25,9 @@ import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
 import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
 import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
+import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
+@SpringBootApplication
 public class Execute {
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
     public static final Postgres postgres = new Postgres();
@@ -39,12 +45,18 @@ public class Execute {
         }
 
         String jobCode = getJobCode();
-        if (jobCode == null) {
-            logger.error("Execute_Job environment variable not set.");
-            cleanup();
-            System.exit(1);
+        if (jobCode != null) {
+            // Run as batch job (your existing functionality)
+            logger.info("Running as batch job: {}", jobCode);
+            runBatchJob(jobCode);
+        } else {
+            // Run as web service
+            logger.info("No job specified - starting as web service");
+            SpringApplication.run(Execute.class, args);
         }
+    }
 
+    private static void runBatchJob(String jobCode) {
         try {
             switch (jobCode) {
                 case Constants.JOB_RUN_ALL_SETUP_JOBS:
@@ -54,59 +66,67 @@ public class Execute {
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
-                    break; //DONE
+                    break;
+
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");
                     syncFactionMembers();
-                    break; //DONE
+                    break;
+
                 case Constants.JOB_UPDATE_COMPLETED_DATA:
                     logger.info("Running completed data update job");
-                    fetchAndProcessAllCompletedCrimes(); //TESTING
+                    fetchAndProcessAllCompletedCrimes();
                     break;
+
                 case Constants.JOB_GET_ALL_OC_CRIMES:
                     logger.info("Running Get All OC Data job");
                     fetchAndProcessAllOC2Crimes();
-                    break; //DONE
+                    break;
+
                 case Constants.JOB_UPDATE_CRIMES_PAID_DATA:
                     logger.info("Running paid crimes data update job");
                     fetchAndProcessAllPaidCrimes();
-                    break; //DONE
+                    break;
+
                 case Constants.JOB_UPDATE_UPDATE_CPR_DATA:
                     logger.info("Running update CPR job");
                     updateAllFactionsCPR();
-                    break; //DONE
-
+                    break;
 
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     logger.info("Running overview data update job");
                     updateAllFactionsOverviewData();
-                    break; //TESTING
+                    break;
 
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
                     // Add your implementation
                     break;
+
+                case Constants.JOB_VERIFY_PAYMENTS:
+                    logger.info("Running payment verification job");
+                    verifyPaymentsAndExpireRequests();
+                    break;
+
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
                     fetchAndProcessAllAvailableMembers();
-                    //TODO: Work out who should join what crime
                     break;
+
                 default:
                     logger.error("Unknown job code: {}", jobCode);
                     cleanup();
                     System.exit(1);
-
-
             }
 
             logger.info("Job {} completed successfully", jobCode);
-            cleanup(); // Clean up before successful exit
+            cleanup();
             System.exit(0);
 
         } catch (Exception e) {
             logger.error("Job {} failed", jobCode, e);
-            cleanup(); // Clean up before error exit
+            cleanup();
             System.exit(1);
         }
     }
