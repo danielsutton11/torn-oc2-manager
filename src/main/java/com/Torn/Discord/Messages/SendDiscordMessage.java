@@ -42,14 +42,16 @@ public class SendDiscordMessage {
         private final String leadershipRoleId;
         private final String ocManagerRoleId;
         private final String bankerRoleId;
+        private final String armourerRoleId;
         private final String webhookUrl;
 
         public DiscordConfig(String factionId, String leadershipRoleId, String ocManagerRoleId,
-                             String bankerRoleId, String webhookUrl) {
+                             String bankerRoleId, String armourerRoleId, String webhookUrl) {
             this.factionId = factionId;
             this.leadershipRoleId = leadershipRoleId;
             this.ocManagerRoleId = ocManagerRoleId;
             this.bankerRoleId = bankerRoleId;
+            this.armourerRoleId = armourerRoleId;
             this.webhookUrl = webhookUrl;
         }
 
@@ -57,6 +59,7 @@ public class SendDiscordMessage {
         public String getLeadershipRoleId() { return leadershipRoleId; }
         public String getOcManagerRoleId() { return ocManagerRoleId; }
         public String getBankerRoleId() { return bankerRoleId; }
+        public String getArmourerRoleId() { return armourerRoleId; }
         public String getWebhookUrl() { return webhookUrl; }
 
         // Helper methods to get role mentions
@@ -71,6 +74,10 @@ public class SendDiscordMessage {
         public String getBankerMention() {
             return bankerRoleId != null ? "<@&" + bankerRoleId + ">" : null;
         }
+
+        public String getArmourerMention() {
+            return armourerRoleId != null ? "<@&" + armourerRoleId + ">" : null;
+        }
     }
 
     /**
@@ -79,7 +86,8 @@ public class SendDiscordMessage {
     public enum RoleType {
         LEADERSHIP,
         OC_MANAGER,
-        BANKER
+        BANKER,
+        ARMOURER
     }
 
     /**
@@ -102,6 +110,14 @@ public class SendDiscordMessage {
     public static boolean sendToBankers(String factionId, String message) {
         return sendToRole(factionId, RoleType.BANKER, message, null, null);
     }
+
+    /**
+     * Send a message to armourer
+     */
+    public static boolean sendToArmourer(String factionId, String message) {
+        return sendToRole(factionId, RoleType.ARMOURER, message, null, null);
+    }
+
 
     /**
      * Send a message with embed to specific role
@@ -264,16 +280,18 @@ public class SendDiscordMessage {
                     String leadershipRoleId = rs.getString("leadership_role_id");
                     String ocManagerRoleId = rs.getString("oc_manager_role_id");
                     String bankerRoleId = rs.getString("banker_role_id");
-                    String webhookUrl = rs.getString("webhook_organised_crimes");
+                    String armourerRoleId = rs.getString("armourer_role_id");
+                    String webhookUrl = rs.getString("oc_webhook_url");
 
                     logger.debug("Loaded Discord config for faction {}: Leadership={}, OC Manager={}, Banker={}, Webhook configured={}",
                             factionId,
                             leadershipRoleId != null ? "Yes" : "No",
                             ocManagerRoleId != null ? "Yes" : "No",
                             bankerRoleId != null ? "Yes" : "No",
+                            armourerRoleId != null ? "Yes" : "No",
                             webhookUrl != null ? "Yes" : "No");
 
-                    return new DiscordConfig(dbFactionId, leadershipRoleId, ocManagerRoleId, bankerRoleId, webhookUrl);
+                    return new DiscordConfig(dbFactionId, leadershipRoleId, ocManagerRoleId, bankerRoleId, armourerRoleId, webhookUrl);
                 } else {
                     logger.warn("No Discord configuration found for faction {}", factionId);
                     return null;
@@ -293,6 +311,8 @@ public class SendDiscordMessage {
                 return config.getOcManagerMention();
             case BANKER:
                 return config.getBankerMention();
+            case ARMOURER:
+                return config.getArmourerMention();
             default:
                 return null;
         }
