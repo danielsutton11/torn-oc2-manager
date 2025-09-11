@@ -33,6 +33,8 @@ public class PaymentController {
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
 
+            PaymentRequestDAO.createTableIfNotExists(connection);
+
             // Try to claim the request (atomic operation)
             boolean claimed = PaymentRequestDAO.claimPaymentRequest(connection, requestId, userId);
 
@@ -91,6 +93,8 @@ public class PaymentController {
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
 
+            PaymentRequestDAO.createTableIfNotExists(connection);
+
             // Use "MANUAL" as userId if not provided
             String claimUserId = userId != null ? userId : "MANUAL";
 
@@ -148,6 +152,8 @@ public class PaymentController {
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
 
+            PaymentRequestDAO.createTableIfNotExists(connection);
+
             PaymentRequest request = PaymentRequestDAO.getPaymentRequest(connection, requestId);
             if (request == null) {
                 return ResponseEntity.status(404).body(createErrorResponse("Request not found"));
@@ -178,11 +184,6 @@ public class PaymentController {
         return error;
     }
 
-    @GetMapping("/test")
-    public ResponseEntity<String> test() {
-        return ResponseEntity.ok("Payment service is running!");
-    }
-
     @GetMapping("/payment/test")
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> response = new HashMap<>();
@@ -196,6 +197,8 @@ public class PaymentController {
             String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
             if (configDatabaseUrl != null) {
                 try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
+
+                    PaymentRequestDAO.createTableIfNotExists(connection);
                     response.put("database", "connected");
                 }
             } else {
