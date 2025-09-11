@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -32,8 +33,6 @@ public class PaymentController {
         }
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
-
-            PaymentRequestDAO.createTableIfNotExists(connection);
 
             // Try to claim the request (atomic operation)
             boolean claimed = PaymentRequestDAO.claimPaymentRequest(connection, requestId, userId);
@@ -93,8 +92,6 @@ public class PaymentController {
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
 
-            PaymentRequestDAO.createTableIfNotExists(connection);
-
             // Use "MANUAL" as userId if not provided
             String claimUserId = userId != null ? userId : "MANUAL";
 
@@ -143,21 +140,31 @@ public class PaymentController {
      * Get request status (optional - for debugging)
      */
     @GetMapping("/status/{requestId}")
-    public ResponseEntity<?> getRequestStatus(@PathVariable String requestId) {
+    public ResponseEntity<?> getRequestStatus(@PathVariable("requestId") String requestId) {
+
+        logger.info("Getting status for request: {}", requestId);
 
         String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            logger.error("DATABASE_URL_CONFIG not set");
             return ResponseEntity.status(500).body(createErrorResponse("Service configuration error"));
         }
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
 
+            // Create table if it doesn't exist
+            logger.debug("Creating payment table if not exists");
             PaymentRequestDAO.createTableIfNotExists(connection);
 
+            logger.debug("Looking up request: {}", requestId);
             PaymentRequest request = PaymentRequestDAO.getPaymentRequest(connection, requestId);
+
             if (request == null) {
+                logger.info("Request not found: {}", requestId);
                 return ResponseEntity.status(404).body(createErrorResponse("Request not found"));
             }
+
+            logger.info("Found request: {} for user: {}", requestId, request.getUsername());
 
             Map<String, Object> response = new HashMap<>();
             response.put("requestId", request.getRequestId());
@@ -171,9 +178,12 @@ public class PaymentController {
 
             return ResponseEntity.ok(response);
 
+        } catch (SQLException e) {
+            logger.error("Database error getting request status for {}: {}", requestId, e.getMessage(), e);
+            return ResponseEntity.status(500).body(createErrorResponse("Database error: " + e.getMessage()));
         } catch (Exception e) {
-            logger.error("Error getting request status for {}: {}", requestId, e.getMessage(), e);
-            return ResponseEntity.status(500).body(createErrorResponse("Internal server error"));
+            logger.error("Unexpected error getting request status for {}: {}", requestId, e.getMessage(), e);
+            return ResponseEntity.status(500).body(createErrorResponse("Internal server error: " + e.getMessage()));
         }
     }
 
@@ -188,7 +198,7 @@ public class PaymentController {
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> response = new HashMap<>();
         response.put("status", "healthy");
-        response.put("service", "OC2 Payment Service");
+        response.put("service", "torn-payment-service");
         response.put("timestamp", System.currentTimeMillis());
         response.put("version", "1.0.0");
 
@@ -197,8 +207,6 @@ public class PaymentController {
             String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
             if (configDatabaseUrl != null) {
                 try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger)) {
-
-                    PaymentRequestDAO.createTableIfNotExists(connection);
                     response.put("database", "connected");
                 }
             } else {
