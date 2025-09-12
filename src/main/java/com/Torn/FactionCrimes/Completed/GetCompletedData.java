@@ -419,65 +419,42 @@ public class GetCompletedData {
     /**
      * Get timestamp configuration based on environment variables and database state
      */
-    private static TimestampConfig getTimestampConfig(Connection connection, String tableName) throws SQLException {
-        // Check for environment variable overrides first
-        String overrideFromTimestamp = System.getenv(Constants.OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP);
-        if (overrideFromTimestamp != null && !overrideFromTimestamp.trim().isEmpty()) {
-            try {
-                long fromTimestamp = Long.parseLong(overrideFromTimestamp.trim());
-                logger.info("Using override FROM timestamp from environment: {} ({})",
-                        fromTimestamp, formatTimestamp(fromTimestamp));
-                return new TimestampConfig(false, fromTimestamp);
-            } catch (NumberFormatException e) {
-                logger.error("Invalid OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP format: {}, ignoring", overrideFromTimestamp);
-            }
-        }
+    private TimestampConfig getTimestampConfig(Connection connection, String tableName) {
+        int incrementalMinutes = DEFAULT_INCREMENTAL_MINUTES;
 
-        // Check for custom look back period for incremental updates
-        int incrementalMinutes = getEnvironmentInt(Constants.OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES, DEFAULT_INCREMENTAL_MINUTES);
-        if(incrementalMinutes == 0) {incrementalMinutes = DEFAULT_INCREMENTAL_MINUTES;}
-
-        // Check if table exists and has recent data
-        String countSql = "SELECT COUNT(*) as row_count, MAX(last_updated) as last_update FROM " + tableName;
+        // Check if table exists and has any data
+        String countSql = "SELECT COUNT(*) as row_count FROM " + tableName;
 
         try (PreparedStatement pstmt = connection.prepareStatement(countSql);
              ResultSet rs = pstmt.executeQuery()) {
 
             if (rs.next()) {
-                int rowCount = rs.getInt(Constants.ROW_COUNT);
-                Timestamp lastUpdate = rs.getTimestamp(Constants.COLUMN_NAME_LAST_UPDATE);
+                int rowCount = rs.getInt("row_count");
 
-                if (rowCount == 0 || lastUpdate == null) {
-                    // Initial sync - get ALL data (no timestamp filter)
-                    logger.info("Table {} is empty - performing initial sync (getting ALL completed crimes)", tableName);
-                    return new TimestampConfig(true, null);
-                }
-
-                // FIXED: Calculate cutoff time ONCE and reuse it for consistency
-                Instant cutoffTime = Instant.now().minusSeconds(incrementalMinutes * 60L);
-                Instant lastUpdateInstant = lastUpdate.toInstant();
-
-                if (lastUpdateInstant.isBefore(cutoffTime)) {
-                    // Been too long, do initial sync
-                    logger.info("Table {} last updated at {} (more than {} minutes ago) - performing initial sync (getting ALL completed crimes)",
-                            tableName, lastUpdate, incrementalMinutes);
-                    return new TimestampConfig(true, null);
+                if (rowCount == 0) {
+                    // Table exists but is empty - do initial sync
+                    long fromTimestamp = Instant.now().minusSeconds(24 * 3600L).getEpochSecond(); // 24 hours
+                    logger.info("Table {} is empty - performing initial sync from 24 hours ago (timestamp: {})",
+                            tableName, fromTimestamp);
+                    return new TimestampConfig(true, fromTimestamp);
                 } else {
-                    // Recent data, do incremental update - use the SAME cutoffTime for consistency
-                    long fromTimestamp = cutoffTime.getEpochSecond();
-                    logger.info("Table {} was recently updated at {} - performing incremental sync from {} minutes ago (timestamp: {})",
-                            tableName, lastUpdate, incrementalMinutes, fromTimestamp);
+                    // Table has data - ALWAYS do incremental sync
+                    long fromTimestamp = Instant.now().minusSeconds(incrementalMinutes * 60L).getEpochSecond();
+                    logger.info("Table {} has {} records - performing incremental sync from {} minutes ago (timestamp: {})",
+                            tableName, rowCount, incrementalMinutes, fromTimestamp);
                     return new TimestampConfig(false, fromTimestamp);
                 }
             }
         } catch (SQLException e) {
-            // Table might not exist yet
-            logger.debug("Table {} might not exist yet, treating as initial sync: {}", tableName, e.getMessage());
-            return new TimestampConfig(true, null);
+            // Table doesn't exist yet - do initial sync
+            logger.info("Table {} doesn't exist yet - performing initial sync: {}", tableName, e.getMessage());
+            long fromTimestamp = Instant.now().minusSeconds(24 * 3600L).getEpochSecond(); // 24 hours
+            return new TimestampConfig(true, fromTimestamp);
         }
 
-        // Fallback
-        return new TimestampConfig(true, null);
+        // Fallback - shouldn't reach here
+        long fromTimestamp = Instant.now().minusSeconds(24 * 3600L).getEpochSecond();
+        return new TimestampConfig(true, fromTimestamp);
     }
 
     /**
