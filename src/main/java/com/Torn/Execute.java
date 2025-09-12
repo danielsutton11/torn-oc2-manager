@@ -2,14 +2,12 @@ package com.Torn;
 
 import com.Torn.Helpers.Constants;
 import com.Torn.Helpers.TableCleanupUtility;
-import com.Torn.PaymentRequests.PaymentVerificationService;
 import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.ComponentScan;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
 
@@ -22,6 +20,7 @@ import static com.Torn.FactionCrimes.Available.GetAvailableCrimes.fetchAndProces
 import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessAllCompletedCrimes;
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
 import static com.Torn.FactionCrimes.Available.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
+import static com.Torn.FactionCrimes.Completed.GetTornStatsCPR.updateAllFactionsCPRFromTornStats;
 import static com.Torn.FactionCrimes._Overview.UpdateOverviewData.updateAllFactionsOverviewData;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
@@ -30,10 +29,7 @@ import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
 //TODO:
-// Item usage logging - When we pay and when we buy for each faction
-// Sending all the other discord messages - Spawn crimes, xanax withdrawl, crimes completed
 // Work out who should join what crimes, create discord message for users to tell them which crime to join
-// Get CPR from tornstats and add into my existing tables
 
 @SpringBootApplication
 @EnableWebMvc
@@ -71,37 +67,34 @@ public class Execute {
                 case Constants.JOB_RUN_ALL_SETUP_JOBS:
                     runAllJobs();
                     break;
-
                 case Constants.JOB_VALIDATE_API_KEYS:
                     logger.info("Running API key validation job");
                     Validate();
                     break;
-
                 case Constants.JOB_GET_FACTION_MEMBERS:
                     logger.info("Running faction members sync job");
                     syncFactionMembers();
                     break;
-
                 case Constants.JOB_UPDATE_COMPLETED_DATA:
                     logger.info("Running completed data update job");
                     fetchAndProcessAllCompletedCrimes();
                     break;
-
                 case Constants.JOB_GET_ALL_OC_CRIMES:
                     logger.info("Running Get All OC Data job");
                     fetchAndProcessAllOC2Crimes();
                     break;
-
                 case Constants.JOB_UPDATE_CRIMES_PAID_DATA:
                     logger.info("Running paid crimes data update job");
                     fetchAndProcessAllPaidCrimes();
                     break;
-
                 case Constants.JOB_UPDATE_UPDATE_CPR_DATA:
                     logger.info("Running update CPR job");
                     updateAllFactionsCPR();
                     break;
-
+                case Constants.JOB_UPDATE_TORNSTATS_CPR:
+                    logger.info("Running TornStats CPR update job");
+                    updateAllFactionsCPRFromTornStats();
+                    break;
                 case Constants.JOB_UPDATE_OVERVIEW_DATA:
                     logger.info("Running overview data update job");
                     updateAllFactionsOverviewData();

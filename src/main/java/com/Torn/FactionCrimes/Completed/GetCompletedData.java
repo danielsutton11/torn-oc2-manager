@@ -11,6 +11,7 @@ import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
 import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.Torn.Discord.Messages.DiscordMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -576,6 +577,19 @@ public class GetCompletedData {
                 // Determine crime success
                 boolean crimeSuccess = determineCrimeSuccess(crime);
 
+                // Send Discord notification for newly completed crime
+                if (crimeSuccess) {
+                    logger.info("Crime {} has completed successfully - sending Discord notification", crime.getId());
+
+                    boolean notificationSent = DiscordMessages.sendCrimeComplete(factionInfo.getFactionId(), crime.getName());
+
+                    if (notificationSent) {
+                        logger.info("Sent crime completion notification for crime {} ({})", crime.getId(), crime.getName());
+                    } else {
+                        logger.warn("Failed to send crime completion notification for crime {} ({})", crime.getId(), crime.getName());
+                    }
+                }
+
                 // Track if we'll be inserting any records for this crime
                 boolean willInsertCrimeRecords = false;
 
@@ -709,6 +723,8 @@ public class GetCompletedData {
             if (items != null && !items.isEmpty()) {
                 StringBuilder itemsBuilder = new StringBuilder();
                 long totalItemValue = 0;
+                boolean hasXanax = false;
+                long totalXanaxQuantity = 0;
 
                 for (int i = 0; i < items.size(); i++) {
                     Map<String, Object> item = items.get(i);
@@ -719,13 +735,21 @@ public class GetCompletedData {
                         Long itemId = itemIdNum.longValue();
                         int quantity = quantityNum.intValue();
 
-                        // Get both item name and price from single market data call
+                        // Single API call per item to get both name and price
                         ItemMarketData itemData = getItemMarketData(itemId, apiKey);
 
                         if (itemData != null && itemData.getName() != null) {
+                            // Check for Xanax while processing
+                            if (itemData.getName().equalsIgnoreCase("Xanax")) {
+                                hasXanax = true;
+                                totalXanaxQuantity += quantity;
+                            }
+
+                            // Build items string
                             if (i > 0) itemsBuilder.append(", ");
                             itemsBuilder.append(itemData.getName());
 
+                            // Calculate item value
                             if (itemData.getAveragePrice() != null) {
                                 totalItemValue += (long) itemData.getAveragePrice() * quantity;
                             }
@@ -735,6 +759,25 @@ public class GetCompletedData {
                                 itemQuantity = (long) quantity;
                             }
                         }
+                    }
+                }
+
+                // Send Xanax withdrawal notification if found
+                if (hasXanax) {
+                    logger.info("Crime {} rewarded {} Xanax - sending withdrawal notification",
+                            crime.getId(), totalXanaxQuantity);
+
+                    boolean notificationSent = DiscordMessages.sendLeaderWithdrawXanax(
+                            String.valueOf(factionIdLong),
+                            crime.getName(),
+                            String.valueOf(totalXanaxQuantity)
+                    );
+
+                    if (notificationSent) {
+                        logger.info("✓ Sent Xanax withdrawal notification for crime {} ({} Xanax)",
+                                crime.getId(), totalXanaxQuantity);
+                    } else {
+                        logger.warn("✗ Failed to send Xanax withdrawal notification for crime {}", crime.getId());
                     }
                 }
 

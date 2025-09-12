@@ -15,6 +15,7 @@ import com.Torn.PaymentRequests.PaymentRequestDAO;
 import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.Torn.ItemManagement.FactionItemTracking;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -145,15 +146,17 @@ public class UpdateOverviewData {
             private final String userId;
             private final String username;
             private final Long crimeId;
+            private final String crimeName;
             private final String role;
             private final String itemRequired;
             private final Integer itemAveragePrice;
 
-            public UserJoinedWithItemData(String userId, String username, Long crimeId, String role,
+            public UserJoinedWithItemData(String userId, String username, Long crimeId, String crimeName, String role,
                                           String itemRequired, Integer itemAveragePrice) {
                 this.userId = userId;
                 this.username = username;
                 this.crimeId = crimeId;
+                this.crimeName = crimeName;
                 this.role = role;
                 this.itemRequired = itemRequired;
                 this.itemAveragePrice = itemAveragePrice;
@@ -162,6 +165,7 @@ public class UpdateOverviewData {
             public String getUserId() { return userId; }
             public String getUsername() { return username; }
             public Long getCrimeId() { return crimeId; }
+            public String getCrimeName() { return crimeName; }
             public String getRole() { return role; }
             public String getItemRequired() { return itemRequired; }
             public Integer getItemAveragePrice() { return itemAveragePrice; }
@@ -454,6 +458,7 @@ public class UpdateOverviewData {
                         newRecord.getUserId(),
                         newRecord.getUsername(),
                         newRecord.getCrimeId(),
+                        newRecord.getCrimeName(),
                         newRecord.getRole(),
                         newRecord.getItemRequired(),
                         newRecord.getItemAveragePrice()
@@ -992,6 +997,23 @@ public class UpdateOverviewData {
                             // Insert into database and get the generated request ID
                             String requestId = PaymentRequestDAO.insertPaymentRequest(configConnection, paymentRequest);
 
+                            // Log member payment requirement in item tracking
+                            try {
+                                FactionItemTracking.logMemberPaymentRequired(
+                                        configConnection, // Use configConnection since we're already in that context
+                                        notification.getFactionSuffix(),
+                                        userData.getCrimeName(), // We don't have crime name in this context
+                                        userData.getUserId(),
+                                        userData.getUsername(),
+                                        userData.getItemRequired(),
+                                        userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : null,
+                                        requestId
+                                );
+                            } catch (SQLException e) {
+                                logger.warn("Failed to log member payment requirement for user {}: {}",
+                                        userData.getUsername(), e.getMessage());
+                            }
+
                             // Send Discord notification with the unique request ID
                             boolean success = DiscordMessages.sendPayMemberForItem(
                                     notification.getFactionId(),
@@ -1005,12 +1027,12 @@ public class UpdateOverviewData {
                             if (success) {
                                 totalNotificationsSent++;
                                 totalRequestsCreated++;
-                                logger.info("✓ Sent payment request for user {} (request: {}, value: ${})",
+                                logger.info("Sent payment request for user {} (request: {}, value: ${})",
                                         userData.getUsername(), requestId,
                                         userData.getItemAveragePrice() != null ? userData.getItemAveragePrice() : 0);
                             } else {
                                 failedNotifications++;
-                                logger.error("✗ Failed to send Discord notification for user {} (request: {})",
+                                logger.error("Failed to send Discord notification for user {} (request: {})",
                                         userData.getUsername(), requestId);
                             }
 

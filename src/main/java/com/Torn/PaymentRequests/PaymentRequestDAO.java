@@ -2,6 +2,7 @@ package com.Torn.PaymentRequests;
 
 import com.Torn.Execute;
 import com.Torn.Helpers.Constants;
+import com.Torn.ItemManagement.FactionItemTracking;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -172,6 +173,19 @@ public class PaymentRequestDAO {
 
             if (success) {
                 logger.info("Payment request {} fulfilled via method: {}", requestId, method);
+
+                // Update item tracking tables
+                try {
+                    String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+                    if (ocDataDatabaseUrl != null && !ocDataDatabaseUrl.isEmpty()) {
+                        try (Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl,
+                                LoggerFactory.getLogger(PaymentRequestDAO.class))) {
+                            FactionItemTracking.updatePaymentRequestFulfilled(ocDataConnection, requestId);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to update item tracking for fulfilled payment {}: {}", requestId, e.getMessage());
+                }
             } else {
                 logger.warn("Failed to mark payment request {} as fulfilled - may not be in CLAIMED status", requestId);
             }

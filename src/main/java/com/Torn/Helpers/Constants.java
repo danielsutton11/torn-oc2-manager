@@ -18,6 +18,7 @@ public class Constants {
     public static final String JOB_CHECK_AVAILABLE_CRIMES_MEMBERS = "AVAILABLE_CRIMES_MEMBERS";
     public static final String JOB_UPDATE_CRIMES_PAID_DATA = "CRIMES_PAID";
     public static final String JOB_UPDATE_UPDATE_CPR_DATA = "UPDATE_MEMBER_CPR";
+    public static final String JOB_UPDATE_TORNSTATS_CPR = "UPDATE_TORNSTATS_CPR";
     public static final String JOB_VERIFY_PAYMENTS = "VERIFY_PAYMENTS";
 
     // FIXED: Use consistent naming for all environment variables

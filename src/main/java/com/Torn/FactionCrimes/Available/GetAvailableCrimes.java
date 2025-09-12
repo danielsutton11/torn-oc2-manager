@@ -11,6 +11,7 @@ import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
 import com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.Torn.Discord.Messages.DiscordMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -304,6 +305,21 @@ public class GetAvailableCrimes {
                 connection.commit();
                 logger.info("Successfully stored {} crimes for faction {} in table {}",
                         crimesProcessed, factionInfo.getFactionId(), tableName);
+
+                // Check if faction needs more crimes (less than 3 available)
+                if (crimesProcessed <= 2) {
+                    logger.info("Faction {} has only {} available crimes - sending Discord notification to spawn more",
+                            factionInfo.getFactionId(), crimesProcessed);
+
+                    boolean notificationSent = DiscordMessages.sendNeedCrimesToSpawn(factionInfo.getFactionId());
+
+                    if (notificationSent) {
+                        logger.info("Sent 'need crimes to spawn' notification for faction {}", factionInfo.getFactionId());
+                    } else {
+                        logger.warn("Failed to send 'need crimes to spawn' notification for faction {}", factionInfo.getFactionId());
+                    }
+                }
+
                 return CrimesProcessingResult.success(crimesProcessed);
 
             } catch (SQLException e) {

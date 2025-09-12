@@ -5,7 +5,7 @@ import com.Torn.Execute;
 import com.Torn.Helpers.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.Torn.ItemManagement.FactionItemTracking;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -184,6 +184,22 @@ public class CheckUsersHaveItems {
             if (itemRequests.isEmpty()) {
                 logger.debug("No item requests found for faction {}", factionInfo.getFactionId());
                 return CheckItemsResult.success(0, false);
+            }
+
+            // Log faction purchase requirements for items users don't have
+            for (UserItemRequest request : itemRequests) {
+                try {
+                    FactionItemTracking.logFactionPurchaseRequired(
+                            ocDataConnection,
+                            factionInfo.getDbSuffix(),
+                            request.getCrimeName(),
+                            request.getItemRequired(),
+                            request.getItemAveragePrice() != null ? request.getItemAveragePrice().longValue() : null
+                    );
+                } catch (SQLException e) {
+                    logger.warn("Failed to log faction purchase requirement for item {}: {}",
+                            request.getItemRequired(), e.getMessage());
+                }
             }
 
             logger.info("Found {} users needing items for faction {}", itemRequests.size(), factionInfo.getFactionId());
