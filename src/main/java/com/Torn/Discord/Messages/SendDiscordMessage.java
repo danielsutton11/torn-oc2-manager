@@ -258,19 +258,17 @@ public class SendDiscordMessage {
             throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
         }
 
-        String sql = "SELECT faction_id, leadership_role_id, oc_manager_role_id, banker_role_id, webhook_organised_crimes " +
+        String sql = "SELECT faction_id, leadership_role_id, oc_manager_role_id, banker_role_id, armourer_role_id, oc_webhook_url " +
                 "FROM " + Constants.TABLE_NAME_DISCORD_ROLES_WEBHOOKS + " " +
                 "WHERE faction_id = ?";
 
         try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger);
              PreparedStatement pstmt = connection.prepareStatement(sql)) {
 
-            // Convert factionId to appropriate type for database query
             try {
                 long factionIdLong = Long.parseLong(factionId);
                 pstmt.setLong(1, factionIdLong);
             } catch (NumberFormatException e) {
-                // If faction ID is not a number, try as string
                 pstmt.setString(1, factionId);
             }
 
@@ -282,14 +280,6 @@ public class SendDiscordMessage {
                     String bankerRoleId = rs.getString("banker_role_id");
                     String armourerRoleId = rs.getString("armourer_role_id");
                     String webhookUrl = rs.getString("oc_webhook_url");
-
-                    logger.debug("Loaded Discord config for faction {}: Leadership={}, OC Manager={}, Banker={}, Webhook configured={}",
-                            factionId,
-                            leadershipRoleId != null ? "Yes" : "No",
-                            ocManagerRoleId != null ? "Yes" : "No",
-                            bankerRoleId != null ? "Yes" : "No",
-                            armourerRoleId != null ? "Yes" : "No",
-                            webhookUrl != null ? "Yes" : "No");
 
                     return new DiscordConfig(dbFactionId, leadershipRoleId, ocManagerRoleId, bankerRoleId, armourerRoleId, webhookUrl);
                 } else {
