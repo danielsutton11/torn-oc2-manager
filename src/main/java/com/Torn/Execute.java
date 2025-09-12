@@ -26,6 +26,7 @@ import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
 import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
 import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
+import static com.Torn.ItemManagement.CheckUsersHaveItems.checkUsersHaveItems;
 import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
 //TODO:
@@ -99,17 +100,14 @@ public class Execute {
                     logger.info("Running overview data update job");
                     updateAllFactionsOverviewData();
                     break;
-
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
-                    // Add your implementation
+                    checkUsersHaveItems();
                     break;
-
                 case Constants.JOB_VERIFY_PAYMENTS:
                     logger.info("Running payment verification job");
                     verifyPaymentsAndExpireRequests();
                     break;
-
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
@@ -168,6 +166,7 @@ public class Execute {
                 updateAllFactionsOverviewData();
                 fetchAndProcessAllPaidCrimes();
                 updateAllFactionsCPR();
+                updateAllFactionsCPRFromTornStats();
 
             } else {
                 logger.info("Execute flag is FALSE - skipping table deletion (this was a dry run)");
