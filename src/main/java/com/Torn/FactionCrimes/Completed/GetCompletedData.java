@@ -550,10 +550,7 @@ public class GetCompletedData {
                 "crime_id, faction_id, crime_name, difficulty, success, completed_at, " +
                 "user_id, username, role, outcome, checkpoint_pass_rate, joined_at, last_updated) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) " +
-                "ON CONFLICT (crime_id, user_id) DO UPDATE SET " +
-                "username = EXCLUDED.username, role = EXCLUDED.role, outcome = EXCLUDED.outcome, " +
-                "checkpoint_pass_rate = EXCLUDED.checkpoint_pass_rate, joined_at = EXCLUDED.joined_at, " +
-                "last_updated = CURRENT_TIMESTAMP";
+                "ON CONFLICT (crime_id, user_id) DO NOTHING"; // CHANGED: DO NOTHING instead of UPDATE
 
         String rewardsTableName = Constants.TABLE_NAME_REWARDS_CRIMES + factionInfo.getDbSuffix();
         createRewardsTableIfNotExists(connection, rewardsTableName);
@@ -561,37 +558,23 @@ public class GetCompletedData {
         int recordsInserted = 0;
         long factionIdLong = Long.parseLong(factionInfo.getFactionId());
 
+        // Track which crimes are newly processed (for notifications)
+        Set<Long> newlyCompletedCrimes = new HashSet<>();
+
         try (PreparedStatement pstmt = connection.prepareStatement(insertSql)) {
             for (Crime crime : crimes) {
                 if (crime.getSlots() == null || crime.getSlots().isEmpty()) {
                     continue;
                 }
 
-                // Check if ANY usernames can be resolved for this crime (now checks across all factions)
                 boolean hasResolvableUsernames = hasAnyResolvableUsernames(crime, usernameMap);
                 if (!hasResolvableUsernames) {
-                    logger.debug("Skipping crime {} - no resolvable usernames found across any faction", crime.getId());
                     continue;
                 }
 
-                // Determine crime success
                 boolean crimeSuccess = determineCrimeSuccess(crime);
-
-                // Send Discord notification for newly completed crime
-                if (crimeSuccess) {
-                    logger.info("Crime {} has completed successfully - sending Discord notification", crime.getId());
-
-                    boolean notificationSent = DiscordMessages.sendCrimeComplete(factionInfo.getFactionId(), crime.getName());
-
-                    if (notificationSent) {
-                        logger.info("Sent crime completion notification for crime {} ({})", crime.getId(), crime.getName());
-                    } else {
-                        logger.warn("Failed to send crime completion notification for crime {} ({})", crime.getId(), crime.getName());
-                    }
-                }
-
-                // Track if we'll be inserting any records for this crime
                 boolean willInsertCrimeRecords = false;
+                int recordsInsertedForThisCrime = 0;
 
                 // Process slots with role renaming logic
                 Map<String, List<Slot>> groupedSlots = crime.getSlots().stream()
@@ -609,11 +592,8 @@ public class GetCompletedData {
                             continue;
                         }
 
-                        // Only process users whose names we can resolve (now from any faction)
                         String username = usernameMap.get(user.getId());
                         if (username == null) {
-                            logger.debug("Skipping user {} in crime {} - username not resolvable across any faction",
-                                    user.getId(), crime.getId());
                             continue;
                         }
 
@@ -625,7 +605,6 @@ public class GetCompletedData {
                             finalRole = slot.getPosition() + " #" + (i + 1);
                         }
 
-                        // Get checkpoint pass rate from slot
                         Integer checkpointPassRate = slot.getCheckpointPassRate();
 
                         // Insert record
@@ -644,21 +623,49 @@ public class GetCompletedData {
                         } else {
                             pstmt.setNull(11, java.sql.Types.INTEGER);
                         }
-                        // Add joined_at timestamp
                         pstmt.setTimestamp(12, timestampFromEpoch(user.getJoinedAt()));
 
-                        pstmt.addBatch();
-                        recordsInserted++;
+                        try {
+                            int rowsAffected = pstmt.executeUpdate();
+                            if (rowsAffected > 0) {
+                                recordsInserted++;
+                                recordsInsertedForThisCrime++;
+                            }
+                        } catch (SQLException e) {
+                            logger.warn("Failed to insert slot for crime {}: {}", crime.getId(), e.getMessage());
+                        }
                     }
                 }
 
-                // Process rewards if crime was successful and we're inserting records for it
-                if (crimeSuccess && willInsertCrimeRecords && crime.getRewards() != null) {
-                    processRewards(connection, rewardsTableName, crime, factionIdLong, factionInfo.getApiKey());
+                // FIXED: Only send notifications if we actually inserted NEW records for this crime
+                if (recordsInsertedForThisCrime > 0) {
+                    newlyCompletedCrimes.add(crime.getId());
+
+                    // Send crime completion notification for newly completed crimes
+                    if (crimeSuccess) {
+                        logger.info("NEW completed crime {} - sending Discord notification", crime.getId());
+
+                        boolean notificationSent = DiscordMessages.sendCrimeComplete(
+                                factionInfo.getFactionId(), crime.getName());
+
+                        if (notificationSent) {
+                            logger.info("✓ Sent crime completion notification for NEW crime {} ({})",
+                                    crime.getId(), crime.getName());
+                        } else {
+                            logger.warn("✗ Failed to send crime completion notification for crime {}",
+                                    crime.getId());
+                        }
+                    }
+
+                    // Process rewards for newly completed crimes
+                    if (crimeSuccess && willInsertCrimeRecords && crime.getRewards() != null) {
+                        processRewards(connection, rewardsTableName, crime, factionIdLong,
+                                factionInfo.getApiKey(), factionInfo.getDbSuffix(), true); // Pass flag indicating new crime
+                    }
+                } else {
+                    logger.debug("Crime {} already exists in database - no notification sent", crime.getId());
                 }
             }
-
-            pstmt.executeBatch();
         }
 
         return recordsInserted;
@@ -692,11 +699,10 @@ public class GetCompletedData {
      * Process and store rewards data for a successful crime
      */
     private static void processRewards(Connection connection, String rewardsTableName, Crime crime,
-                                       Long factionIdLong, String apiKey) {
+                                       Long factionIdLong, String apiKey, String factionSuffix, boolean isNewCrime) {
         try {
             // Parse rewards from Crime object
             if (!(crime.getRewards() instanceof Map)) {
-                logger.debug("Rewards data is not in expected format for crime {}", crime.getId());
                 return;
             }
 
@@ -716,7 +722,7 @@ public class GetCompletedData {
             // Process items with single API call per item
             String itemsString = "";
             Long itemQuantity = null;
-            long crimeValue = money; // Start with money value
+            long crimeValue = money;
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> items = (List<Map<String, Object>>) rewards.get(Constants.NODE_ITEMS);
@@ -735,7 +741,6 @@ public class GetCompletedData {
                         Long itemId = itemIdNum.longValue();
                         int quantity = quantityNum.intValue();
 
-                        // Single API call per item to get both name and price
                         ItemMarketData itemData = getItemMarketData(itemId, apiKey);
 
                         if (itemData != null && itemData.getName() != null) {
@@ -754,7 +759,6 @@ public class GetCompletedData {
                                 totalItemValue += (long) itemData.getAveragePrice() * quantity;
                             }
 
-                            // If there's only one item type, store its quantity
                             if (items.size() == 1) {
                                 itemQuantity = (long) quantity;
                             }
@@ -762,9 +766,9 @@ public class GetCompletedData {
                     }
                 }
 
-                // Send Xanax withdrawal notification if found
-                if (hasXanax) {
-                    logger.info("Crime {} rewarded {} Xanax - sending withdrawal notification",
+                // FIXED: Only send Xanax withdrawal notification for NEW crimes
+                if (hasXanax && isNewCrime) {
+                    logger.info("NEW crime {} rewarded {} Xanax - sending withdrawal notification",
                             crime.getId(), totalXanaxQuantity);
 
                     boolean notificationSent = DiscordMessages.sendLeaderWithdrawXanax(
@@ -774,11 +778,14 @@ public class GetCompletedData {
                     );
 
                     if (notificationSent) {
-                        logger.info("✓ Sent Xanax withdrawal notification for crime {} ({} Xanax)",
+                        logger.info("Sent Xanax withdrawal notification for NEW crime {} ({} Xanax)",
                                 crime.getId(), totalXanaxQuantity);
                     } else {
-                        logger.warn("✗ Failed to send Xanax withdrawal notification for crime {}", crime.getId());
+                        logger.warn("Failed to send Xanax withdrawal notification for crime {}", crime.getId());
                     }
+                } else if (hasXanax && !isNewCrime) {
+                    logger.debug("Crime {} has Xanax but already exists in database - no notification sent",
+                            crime.getId());
                 }
 
                 itemsString = itemsBuilder.toString();
@@ -788,15 +795,12 @@ public class GetCompletedData {
             // Format completed date for rewards table consistency
             String completedDateFriendly = formatFriendlyDate(crime.getExecutedAt());
 
-            // Use UPSERT for rewards as well
+            // Use UPSERT for rewards but with DO NOTHING for existing records
             String insertRewardsSql = "INSERT INTO " + rewardsTableName + " (" +
                     "crime_id, faction_id, crime_name, total_members_required, total_success_value, " +
                     "completed_date, crime_value, items, item_quantity, respect_earnt, last_updated) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) " +
-                    "ON CONFLICT (crime_id) DO UPDATE SET " +
-                    "crime_value = EXCLUDED.crime_value, items = EXCLUDED.items, " +
-                    "item_quantity = EXCLUDED.item_quantity, respect_earnt = EXCLUDED.respect_earnt, " +
-                    "last_updated = CURRENT_TIMESTAMP";
+                    "ON CONFLICT (crime_id) DO NOTHING"; // CHANGED: DO NOTHING instead of UPDATE
 
             try (PreparedStatement rewardsPstmt = connection.prepareStatement(insertRewardsSql)) {
                 rewardsPstmt.setLong(1, crime.getId());
@@ -814,8 +818,12 @@ public class GetCompletedData {
                 }
                 rewardsPstmt.setInt(10, respect);
 
-                rewardsPstmt.executeUpdate();
-                logger.debug("Upserted rewards data for crime {}", crime.getId());
+                int rowsAffected = rewardsPstmt.executeUpdate();
+                if (rowsAffected > 0) {
+                    logger.debug("Inserted NEW rewards data for crime {}", crime.getId());
+                } else {
+                    logger.debug("Rewards data already exists for crime {}", crime.getId());
+                }
             }
 
         } catch (Exception e) {

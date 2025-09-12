@@ -28,12 +28,11 @@ public class DiscordMessages {
                 .setDescription(String.format(
                         "**%s [%s]** needs payment for an item they already have:\n\n" +
                                 "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n" +
-                                "⏰ **Expires:** 15 minutes after claimed\n",
+                                "💵 **Amount:** %s\n",
                         playerName, playerId, itemName, formatCurrency(amount)
                 ))
                 .setColor(Colors.BLUE)
-                .addField("🔧 Quick Actions",
+                .addField("Quick Actions",
                         "[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
                                 "Automatically opens Torn payment page\n\n" +
                                 "[**Manual Fulfill**](" + createManualPayUrl(requestId) + ") - " +
@@ -88,7 +87,7 @@ public class DiscordMessages {
                         crimeName, itemQuantity
                 ))
                 .setColor(Colors.ORANGE)
-                .addField("📋 Quick Actions",
+                .addField("Quick Actions",
                         "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
@@ -118,7 +117,7 @@ public class DiscordMessages {
                         crimeName
                 ))
                 .setColor(Colors.GREEN)
-                .addField("📋 Quick Actions",
+                .addField("Quick Actions",
                         "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
@@ -146,7 +145,7 @@ public class DiscordMessages {
                         "There are currently insufficient organised crimes available, please spawn some more!\n"
                 )
                 .setColor(Colors.CYAN)
-                .addField("📋 Quick Actions",
+                .addField("Quick Actions",
                         "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
@@ -210,7 +209,7 @@ public class DiscordMessages {
                 .setTitle("🔫 OC2 Items Required")
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
-                .addField("📋 Quick Actions", quickActions.toString(), false)
+                .addField("Quick Actions", quickActions.toString(), false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
