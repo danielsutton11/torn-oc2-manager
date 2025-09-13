@@ -26,38 +26,22 @@ public class DiscordMessages {
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💰 Payment Request #" + requestId.substring(0, 8) + "...")
                 .setDescription(String.format(
-                        "**%s [%s]** needs payment for an item they already have:\n\n" +
+                        "**%s [%s]** needs payment for an OC item they already had:\n\n" +
                                 "💎 **Item:** %s\n" +
                                 "💵 **Amount:** %s\n",
                         playerName, playerId, itemName, formatCurrency(amount)
                 ))
                 .setColor(Colors.BLUE)
-                .addField("Quick Actions",
-                        "[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
+                .addField("__Quick Actions__",
+                        "\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
                                 "Automatically opens Torn payment page\n\n" +
                                 "[**Manual Fulfill**](" + createManualPayUrl(requestId) + ") - " +
                                 "Claim request for manual payment\n\n" +
                                 "[**Torn Payment Page**](https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user) - " +
                                 "Direct link to faction controls",
                         false)
-                .addField("📋 Request Details",
-                        String.format(
-                                "**Request ID:** %s\n" +
-                                        "**Player:** %s [%s]\n" +
-                                        "**Amount:** %s\n" +
-                                        "**Item:** %s\n" +
-                                        "**Status:** ⏳ Pending\n" +
-                                        "**Crime ID:** %s",
-                                requestId.substring(0, 8) + "...",
-                                playerName,
-                                playerId,
-                                formatCurrency(amount),
-                                itemName,
-                                "N/A" // Could add crime ID if needed
-                        ),
-                        true)
                 .addField("ℹ️ Important Notes",
-                        "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
+                        "\n•Click **Auto Fulfill** to be redirected to Torn payment page\n" +
                                 "• Use **Manual Fulfill** if you prefer to pay manually\n" +
                                 "• Links become invalid once claimed by someone\n" +
                                 "• Unclaimed requests reset after 15 minutes",
@@ -69,6 +53,37 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.BANKER,
+                null, // No additional text message
+                embed,
+                "OC2 Payment Manager" // Custom bot name
+        );
+    }
+
+    /**
+     * send PaymentFulfilled Message
+     */
+    public static boolean paymentFulfilled(String factionId,
+                                               String playerName,
+                                               String playerId,
+                                               String requestId,
+                                               String itemName,
+                                               long amount) {
+
+        DiscordEmbed embed = new DiscordEmbed()
+                .setTitle("💰 Payment Fulfilled #" + requestId.substring(0, 8) + "...")
+                .setDescription(String.format(
+                        "The payment to **%s [%s]** has been fulfilled:\n\n" +
+                                "💎 **Item:** %s\n" +
+                                "💵 **Amount:** %s\n",
+                        playerName, playerId, itemName, formatCurrency(amount)
+                ))
+                .setColor(Colors.GREEN)
+                .setFooter("OC2 Payment System", null)
+                .setTimestamp(java.time.Instant.now().toString());
+
+        // Send to bankers with custom username
+        return SendDiscordMessage.sendMessageNoRole(
+                factionId,
                 null, // No additional text message
                 embed,
                 "OC2 Payment Manager" // Custom bot name

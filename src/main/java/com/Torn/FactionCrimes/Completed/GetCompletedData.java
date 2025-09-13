@@ -419,7 +419,7 @@ public class GetCompletedData {
     /**
      * Get timestamp configuration based on environment variables and database state
      */
-    private TimestampConfig getTimestampConfig(Connection connection, String tableName) {
+    private static TimestampConfig getTimestampConfig(Connection connection, String tableName) {
         int incrementalMinutes = DEFAULT_INCREMENTAL_MINUTES;
 
         // Check if table exists and has any data

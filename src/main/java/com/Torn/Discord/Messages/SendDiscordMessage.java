@@ -250,6 +250,54 @@ public class SendDiscordMessage {
     }
 
     /**
+     * Send a message to no roles
+     */
+    public static boolean sendMessageNoRole(String factionId,String message,
+                                      DiscordEmbed embed, String customUsername) {
+        if (message == null || message.trim().isEmpty()) {
+            logger.warn("Cannot send empty message to Discord");
+            return false;
+        }
+
+        try {
+            // Load Discord configuration from database
+            DiscordConfig config = loadDiscordConfig(factionId);
+            if (config == null) {
+                logger.error("No Discord configuration found for faction {}", factionId);
+                return false;
+            }
+
+            if (config.getWebhookUrl() == null || config.getWebhookUrl().trim().isEmpty()) {
+                logger.error("No webhook URL configured for faction {}", factionId);
+                return false;
+            }
+            // Create Discord payload
+            Map<String, Object> payload = new HashMap<>();
+
+            if (!message.trim().isEmpty()) {
+                payload.put("content", message.trim());
+            }
+
+            if (embed != null) {
+                payload.put("embeds", new Object[]{embed.toMap()});
+            }
+
+            if (customUsername != null && !customUsername.trim().isEmpty()) {
+                payload.put("username", customUsername.trim());
+            } else {
+                payload.put("username", "TornBot OC Manager");
+            }
+
+            return sendDiscordWebhook(payload, config.getWebhookUrl());
+
+        } catch (Exception e) {
+            logger.error("Error sending Discord message for faction {}: {}",
+                    factionId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
      * Load Discord configuration from database for a specific faction
      */
     private static DiscordConfig loadDiscordConfig(String factionId) throws SQLException {
