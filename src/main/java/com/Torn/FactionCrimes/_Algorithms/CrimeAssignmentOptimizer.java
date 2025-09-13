@@ -573,7 +573,9 @@ public class CrimeAssignmentOptimizer {
         List<AvailableCrimeSlot> slots = new ArrayList<>();
         String availableCrimesTable = "a_crimes_" + factionInfo.getDbSuffix();
 
-        // Removed urgency-based ordering, now focuses on value and priority
+        logger.info("DEBUG: Attempting to load crimes from table: {}", availableCrimesTable);
+
+
         String slotsSql = "SELECT ac.crime_id, ac.name, ac.difficulty, ac.expired_at, " +
                 "ac.slot_position, ac.slot_position_id, " +
                 "oc2.rewards_value_high, oc2.rewards_value_low " +
@@ -582,6 +584,7 @@ public class CrimeAssignmentOptimizer {
                 "ORDER BY oc2.rewards_value_high DESC, ac.difficulty DESC";
 
         try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql);
+
              ResultSet slotsRs = slotsStmt.executeQuery()) {
 
             while (slotsRs.next()) {
@@ -603,9 +606,11 @@ public class CrimeAssignmentOptimizer {
                 slots.add(new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
                         difficulty, expiredAt, expectedValue, slotPriority));
             }
+
         } catch (SQLException e) {
             logger.debug("Could not load available crime slots for faction {} (table might not exist): {}",
                     factionInfo.getFactionId(), e.getMessage());
+            throw e;
         }
 
         logger.debug("Loaded {} available crime slots for faction {}", slots.size(), factionInfo.getFactionId());
