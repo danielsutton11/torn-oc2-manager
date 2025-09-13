@@ -618,7 +618,6 @@ public class CrimeAssignmentOptimizer {
         return slots;
     }
 
-    // Helper method to load crime rewards from CONFIG database
     private static Map<String, CrimeRewardData> loadCrimeRewardsFromConfig(Connection configConnection) throws SQLException {
         Map<String, CrimeRewardData> rewards = new HashMap<>();
 
@@ -998,19 +997,14 @@ public class CrimeAssignmentOptimizer {
         AssignmentRecommendation recommendation = generateAssignmentRecommendations(
                 configConnection, ocDataConnection, factionInfo);
 
-        // TEMPORARY DEBUG
-        logger.info("URGENT DEBUG - Faction {}: {} assignments found",
-                factionInfo.getFactionId(),
-                recommendation.getImmediateAssignments().size());
-
         if (recommendation.getImmediateAssignments().isEmpty()) {
             logger.debug("No assignments to notify for faction {}", factionInfo.getFactionId());
             return true; // Not an error, just nothing to send
         }
 
-        // Load Discord member mappings
+        // Load Discord member mappings from CONFIG database (not OC_DATA)
         Map<String, DiscordMemberMapping> memberMappings = loadDiscordMemberMappings(
-                ocDataConnection, factionInfo);
+                configConnection, factionInfo); // <- Changed from ocDataConnection to configConnection
 
         if (memberMappings.isEmpty()) {
             logger.warn("No Discord member mappings found for faction {}", factionInfo.getFactionId());
@@ -1022,34 +1016,44 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Load Discord member mappings from the members table
+     * Load Discord member mappings from the members table in CONFIG database
      */
-    private static Map<String, DiscordMemberMapping> loadDiscordMemberMappings(Connection ocDataConnection,
+    private static Map<String, DiscordMemberMapping> loadDiscordMemberMappings(Connection configConnection,
                                                                                FactionInfo factionInfo) throws SQLException {
         Map<String, DiscordMemberMapping> mappings = new HashMap<>();
+
+        // Fixed table name format: members_factionsuffix
         String membersTable = "members_" + factionInfo.getDbSuffix();
 
-        String sql = "SELECT user_id, username, discord_id FROM " + membersTable +
-                " WHERE discord_id IS NOT NULL AND discord_id != ''";
+        // Fixed column name: user_discord_id instead of discord_id
+        String sql = "SELECT user_id, username, user_discord_id FROM " + membersTable +
+                " WHERE user_discord_id IS NOT NULL AND user_discord_id != ''";
 
-        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql);
+        logger.info("DEBUG: Loading Discord mappings from CONFIG database table: {}", membersTable);
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
+            int mappingCount = 0;
             while (rs.next()) {
                 String userId = rs.getString("user_id");
                 String username = rs.getString("username");
-                String discordId = rs.getString("discord_id");
+                String discordId = rs.getString("user_discord_id"); // Fixed column name
 
                 if (userId != null && discordId != null && !discordId.trim().isEmpty()) {
                     mappings.put(userId, new DiscordMemberMapping(userId, username, discordId.trim()));
+                    mappingCount++;
                 }
             }
+
+            logger.info("DEBUG: Loaded {} Discord member mappings for faction {}", mappingCount, factionInfo.getFactionId());
+
         } catch (SQLException e) {
-            logger.debug("Could not load Discord member mappings for faction {} (table might not exist): {}",
-                    factionInfo.getFactionId(), e.getMessage());
+            logger.error("ERROR: Could not load Discord member mappings for faction {} from table {}: {}",
+                    factionInfo.getFactionId(), membersTable, e.getMessage());
+            throw e; // Don't silently ignore this
         }
 
-        logger.debug("Loaded {} Discord member mappings for faction {}", mappings.size(), factionInfo.getFactionId());
         return mappings;
     }
 
