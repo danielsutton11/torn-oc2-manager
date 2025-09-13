@@ -564,9 +564,6 @@ public class CrimeAssignmentOptimizer {
         return result.toString();
     }
 
-    /**
-     * Load available crime slots with expected values (urgency calculations removed)
-     */
     private static List<AvailableCrimeSlot> loadAvailableCrimeSlots(Connection configConnection,
                                                                     Connection ocDataConnection,
                                                                     FactionInfo factionInfo) throws SQLException {
@@ -575,46 +572,88 @@ public class CrimeAssignmentOptimizer {
 
         logger.info("DEBUG: Attempting to load crimes from table: {}", availableCrimesTable);
 
+        // First, load the OC2 crimes reference data from CONFIG database
+        Map<String, CrimeRewardData> crimeRewards = loadCrimeRewardsFromConfig(configConnection);
 
-        String slotsSql = "SELECT ac.crime_id, ac.name, ac.difficulty, ac.expired_at, " +
-                "ac.slot_position, ac.slot_position_id, " +
-                "oc2.rewards_value_high, oc2.rewards_value_low " +
-                "FROM " + availableCrimesTable + " ac " +
-                "LEFT JOIN " + Constants.TABLE_NAME_OC2_CRIMES + " oc2 ON ac.name = oc2.crime_name " +
-                "ORDER BY oc2.rewards_value_high DESC, ac.difficulty DESC";
+        // Then load available crimes from OC_DATA database
+        String slotsSql = "SELECT crime_id, name, difficulty, expired_at, " +
+                "slot_position, slot_position_id " +
+                "FROM " + availableCrimesTable + " " +
+                "ORDER BY difficulty DESC";
 
-        try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql);
+        try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql)) {
+            logger.info("DEBUG: Executing query on OC_DATA: {}", slotsSql);
 
-             ResultSet slotsRs = slotsStmt.executeQuery()) {
+            try (ResultSet slotsRs = slotsStmt.executeQuery()) {
+                int rowCount = 0;
+                while (slotsRs.next()) {
+                    rowCount++;
+                    Long crimeId = slotsRs.getLong("crime_id");
+                    String crimeName = slotsRs.getString("name");
+                    String slotPosition = slotsRs.getString("slot_position");
+                    String slotPositionId = slotsRs.getString("slot_position_id");
+                    Integer difficulty = slotsRs.getObject("difficulty", Integer.class);
+                    Timestamp expiredAt = slotsRs.getTimestamp("expired_at");
 
-            while (slotsRs.next()) {
-                Long crimeId = slotsRs.getLong("crime_id");
-                String crimeName = slotsRs.getString("name");
-                String slotPosition = slotsRs.getString("slot_position");
-                String slotPositionId = slotsRs.getString("slot_position_id");
-                Integer difficulty = slotsRs.getObject("difficulty", Integer.class);
-                Timestamp expiredAt = slotsRs.getTimestamp("expired_at");
-                Long rewardsHigh = slotsRs.getObject("rewards_value_high", Long.class);
-                Long rewardsLow = slotsRs.getObject("rewards_value_low", Long.class);
+                    // Get reward data from the config database lookup
+                    CrimeRewardData rewardData = crimeRewards.get(crimeName);
+                    Long rewardsHigh = rewardData != null ? rewardData.getHighValue() : null;
+                    Long rewardsLow = rewardData != null ? rewardData.getLowValue() : null;
 
-                // Calculate expected value (average of high/low, fallback to difficulty-based estimate)
-                Long expectedValue = calculateExpectedValue(rewardsHigh, rewardsLow, difficulty);
+                    Long expectedValue = calculateExpectedValue(rewardsHigh, rewardsLow, difficulty);
+                    Double slotPriority = calculateSlotPriority(slotPosition, difficulty);
 
-                // Calculate slot priority (enhanced importance in the new algorithm)
-                Double slotPriority = calculateSlotPriority(slotPosition, difficulty);
-
-                slots.add(new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
-                        difficulty, expiredAt, expectedValue, slotPriority));
+                    slots.add(new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
+                            difficulty, expiredAt, expectedValue, slotPriority));
+                }
+                logger.info("DEBUG: Found {} crime slots in table {}", rowCount, availableCrimesTable);
             }
-
         } catch (SQLException e) {
-            logger.debug("Could not load available crime slots for faction {} (table might not exist): {}",
-                    factionInfo.getFactionId(), e.getMessage());
+            logger.error("ERROR: Could not load available crime slots for faction {} from table {}: {}",
+                    factionInfo.getFactionId(), availableCrimesTable, e.getMessage());
             throw e;
         }
 
-        logger.debug("Loaded {} available crime slots for faction {}", slots.size(), factionInfo.getFactionId());
+        logger.info("DEBUG: Loaded {} available crime slots for faction {}", slots.size(), factionInfo.getFactionId());
         return slots;
+    }
+
+    // Helper method to load crime rewards from CONFIG database
+    private static Map<String, CrimeRewardData> loadCrimeRewardsFromConfig(Connection configConnection) throws SQLException {
+        Map<String, CrimeRewardData> rewards = new HashMap<>();
+
+        String rewardsSql = "SELECT crime_name, rewards_value_high, rewards_value_low FROM " + Constants.TABLE_NAME_OC2_CRIMES;
+
+        try (PreparedStatement stmt = configConnection.prepareStatement(rewardsSql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String crimeName = rs.getString("crime_name");
+                Long highValue = rs.getObject("rewards_value_high", Long.class);
+                Long lowValue = rs.getObject("rewards_value_low", Long.class);
+
+                rewards.put(crimeName, new CrimeRewardData(highValue, lowValue));
+            }
+        } catch (SQLException e) {
+            logger.warn("Could not load crime rewards from config database: {}", e.getMessage());
+        }
+
+        logger.info("DEBUG: Loaded {} crime reward entries from config database", rewards.size());
+        return rewards;
+    }
+
+    // Helper class for crime reward data
+    private static class CrimeRewardData {
+        private final Long highValue;
+        private final Long lowValue;
+
+        public CrimeRewardData(Long highValue, Long lowValue) {
+            this.highValue = highValue;
+            this.lowValue = lowValue;
+        }
+
+        public Long getHighValue() { return highValue; }
+        public Long getLowValue() { return lowValue; }
     }
 
     /**
