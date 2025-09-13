@@ -157,16 +157,26 @@ public class Execute {
                 logger.info("All tables deleted successfully");
 
                 logger.warn("==========================================");
-                logger.info("Running All Set Up Jobs");
+                logger.info("Running All Set Up Jobs with Discord notifications SUPPRESSED");
                 logger.warn("==========================================");
-                Validate();
-                syncFactionMembers();
-                fetchAndProcessAllCompletedCrimes();
-                fetchAndProcessAllOC2Crimes();
-                updateAllFactionsOverviewData();
-                fetchAndProcessAllPaidCrimes();
-                updateAllFactionsCPR();
-                updateAllFactionsCPRFromTornStats();
+
+                // Set environment variable to suppress Discord notifications
+                System.setProperty(Constants.SUPPRESS_PROCESSING, "true");
+
+                try {
+                    Validate();
+                    syncFactionMembers();
+                    fetchAndProcessAllCompletedCrimes();
+                    fetchAndProcessAllOC2Crimes();
+                    updateAllFactionsOverviewData();
+                    fetchAndProcessAllPaidCrimes();
+                    updateAllFactionsCPR();
+                    updateAllFactionsCPRFromTornStats();
+                } finally {
+                    // Remove the suppression flag after setup is complete
+                    System.clearProperty(Constants.SUPPRESS_PROCESSING);
+                    logger.info("Setup jobs completed - Discord notifications re-enabled");
+                }
 
             } else {
                 logger.info("Execute flag is FALSE - skipping table deletion (this was a dry run)");

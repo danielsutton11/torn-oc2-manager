@@ -199,16 +199,21 @@ public class GetTornStatsCPR {
     }
 
     /**
-     * Get faction information with TornStats API keys from the config database
+     * Get faction information with API keys from the standard api_keys table pattern
      */
     private static List<FactionInfo> getFactionInfoWithTornStatsKeys(Connection configConnection) throws SQLException {
         List<FactionInfo> factions = new ArrayList<>();
 
-        // TODO: Update this query when you add the tornstats_api_key column to your factions table
-        String sql = "SELECT " + Constants.COLUMN_NAME_FACTION_ID + ", " + Constants.COLUMN_NAME_DB_SUFFIX +
-                ", tornstats_api_key " +
-                "FROM " + Constants.TABLE_NAME_FACTIONS + " " +
-                "WHERE oc2_enabled = true AND tornstats_api_key IS NOT NULL AND tornstats_api_key != ''";
+        // Use the same pattern as all other classes - join factions with api_keys table
+        String sql = "SELECT DISTINCT ON (f." + Constants.COLUMN_NAME_FACTION_ID + ") " +
+                "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
+                "f." + Constants.COLUMN_NAME_DB_SUFFIX + ", " +
+                "ak." + Constants.COLUMN_NAME_API_KEY + " " +
+                "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
+                "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
+                "WHERE ak." + Constants.COLUMN_NAME_ACTIVE + " = true " +
+                "AND f.oc2_enabled = true " +
+                "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID + ", ak." + Constants.COLUMN_NAME_API_KEY;
 
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
@@ -216,26 +221,19 @@ public class GetTornStatsCPR {
             while (rs.next()) {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
-                String tornStatsApiKey = rs.getString("api_key");
+                String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
 
-                if (factionId != null && dbSuffix != null && tornStatsApiKey != null &&
+                if (factionId != null && dbSuffix != null && apiKey != null &&
                         isValidDbSuffix(dbSuffix)) {
-                    factions.add(new FactionInfo(factionId, dbSuffix, tornStatsApiKey));
+                    factions.add(new FactionInfo(factionId, dbSuffix, apiKey));
                 } else {
-                    logger.warn("Skipping faction with invalid data: factionId={}, dbSuffix={}, hasApiKey={}",
-                            factionId, dbSuffix, tornStatsApiKey != null);
+                    logger.warn("Skipping faction with invalid data: factionId={}, dbSuffix={}, apiKey={}",
+                            factionId, dbSuffix, (apiKey == null ? "null" : "***"));
                 }
             }
-        } catch (SQLException e) {
-            if (e.getMessage().contains("_api_key")) {
-                logger.warn("Column 'api_key' not found in factions table. " +
-                        "Please add this column to store TornStats API keys for each faction.");
-                return new ArrayList<>();
-            }
-            throw e;
         }
 
-        logger.info("Found {} factions with TornStats API keys", factions.size());
+        logger.info("Found {} factions with API keys for TornStats CPR update", factions.size());
         return factions;
     }
 

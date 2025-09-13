@@ -982,10 +982,20 @@ public class UpdateOverviewData {
 
             for (DiscordNotificationData notification : allNotifications) {
                 try {
+
                     logger.info("Processing notifications for faction {} with {} users",
                             notification.getFactionId(), notification.getUsersJoinedWithItems().size());
 
                     for (DiscordNotificationData.UserJoinedWithItemData userData : notification.getUsersJoinedWithItems()) {
+
+                        // Check if payment requests are suppressed (during setup jobs)
+                        String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
+                        if ("true".equalsIgnoreCase(suppressNotifications)) {
+                            logger.debug("Payment requests suppressed during setup - skipping request creation for user {}",
+                                    userData.getUsername());
+                            continue; // Skip to next user
+                        }
+
                         try {
                             // Create payment request record in database
                             PaymentRequest paymentRequest = new PaymentRequest(
@@ -1059,14 +1069,20 @@ public class UpdateOverviewData {
                 }
             }
 
-            // Final summary
-            logger.info("Discord notifications completed:");
-            logger.info("  Payment requests created: {}", totalRequestsCreated);
-            logger.info("  Notifications sent successfully: {}", totalNotificationsSent);
-            logger.info("  Failed notifications: {}", failedNotifications);
+            String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
+            if ("true".equalsIgnoreCase(suppressNotifications)) {
+                logger.info("Setup mode: Discord notifications and payment requests suppressed");
+                logger.info("  Users with items detected: {}", allNotifications.stream()
+                        .mapToInt(n -> n.getUsersJoinedWithItems().size()).sum());
+            } else {
+                logger.info("Discord notifications completed:");
+                logger.info("  Payment requests created: {}", totalRequestsCreated);
+                logger.info("  Notifications sent successfully: {}", totalNotificationsSent);
+                logger.info("  Failed notifications: {}", failedNotifications);
 
-            if (totalRequestsCreated > 0) {
-                logger.info("All payment requests are tracked in the database and will expire if not claimed within 15 minutes");
+                if (totalRequestsCreated > 0) {
+                    logger.info("All payment requests are tracked in the database and will expire if not claimed within 15 minutes");
+                }
             }
 
         } catch (SQLException e) {

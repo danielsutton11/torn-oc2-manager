@@ -5,7 +5,7 @@ import com.Torn.Execute;
 import com.Torn.Helpers.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.Torn.ItemManagement.FactionItemTracking;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -189,6 +189,14 @@ public class CheckUsersHaveItems {
             // Log faction purchase requirements for items users don't have
             for (UserItemRequest request : itemRequests) {
                 try {
+                    // Check if we should suppress tracking during setup
+                    String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
+                    if ("true".equalsIgnoreCase(suppressNotifications)) {
+                        logger.debug("Item tracking suppressed during setup - skipping logging for item {}",
+                                request.getItemRequired());
+                        continue; // Skip logging during setup
+                    }
+
                     FactionItemTracking.logFactionPurchaseRequired(
                             ocDataConnection,
                             factionInfo.getDbSuffix(),

@@ -386,6 +386,13 @@ public class SendDiscordMessage {
      * Core method to send webhook payload to Discord
      */
     private static boolean sendDiscordWebhook(Map<String, Object> payload, String webhookUrl) {
+        String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
+        if ("true".equalsIgnoreCase(suppressNotifications)) {
+            logger.debug("Discord notifications suppressed - skipping webhook send");
+            return true; // Return true to not break the flow
+        }
+
+
         try {
             // Convert payload to JSON
             String jsonPayload = objectMapper.writeValueAsString(payload);

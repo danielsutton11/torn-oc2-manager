@@ -6,6 +6,7 @@ public class Constants {
     public static final String EXECUTE = "Execute";
 
     public static final String PAYMENT_SERVICE_BASE_URL = "PAYMENT_SERVICE_BASE_URL";
+    public static final String SUPPRESS_PROCESSING = "SUPPRESS_PROCESSING";
 
     //RAILWAY VARIABLE NAMES
     public static final String JOB_RUN_ALL_SETUP_JOBS = "RUN_ALL_SETUP_JOBS";
