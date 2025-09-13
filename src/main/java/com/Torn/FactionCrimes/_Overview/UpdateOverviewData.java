@@ -1004,16 +1004,21 @@ public class UpdateOverviewData {
 
                             // Log member payment requirement in item tracking
                             try {
-                                FactionItemTracking.logMemberPaymentRequired(
-                                        configConnection, // Use configConnection since we're already in that context
-                                        notification.getFactionSuffix(),
-                                        userData.getCrimeName(), // We don't have crime name in this context
-                                        userData.getUserId(),
-                                        userData.getUsername(),
-                                        userData.getItemRequired(),
-                                        userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : null,
-                                        requestId
-                                );
+                                String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+                                if (ocDataDatabaseUrl != null && !ocDataDatabaseUrl.isEmpty()) {
+                                    try (Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+                                        FactionItemTracking.logMemberPaymentRequired(
+                                                ocDataConnection,
+                                                notification.getFactionSuffix(),
+                                                userData.getCrimeName(),
+                                                userData.getUserId(),
+                                                userData.getUsername(),
+                                                userData.getItemRequired(),
+                                                userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : null,
+                                                requestId
+                                        );
+                                    }
+                                }
                             } catch (SQLException e) {
                                 logger.warn("Failed to log member payment requirement for user {}: {}",
                                         userData.getUsername(), e.getMessage());
