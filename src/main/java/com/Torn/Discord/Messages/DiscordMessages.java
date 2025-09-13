@@ -3,12 +3,14 @@ package com.Torn.Discord.Messages;
 import com.Torn.Discord.Messages.SendDiscordMessage.DiscordEmbed;
 import com.Torn.Discord.Messages.SendDiscordMessage.RoleType;
 import com.Torn.Discord.Messages.SendDiscordMessage.Colors;
+import com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer;
 import com.Torn.Helpers.Constants;
 import org.apache.tomcat.util.bcel.Const;
 import org.jetbrains.annotations.NotNull;
 
 import java.text.DecimalFormat;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class DiscordMessages {
 
@@ -41,7 +43,7 @@ public class DiscordMessages {
                                 "Direct link to faction controls",
                         false)
                 .addField("ℹ️ Important Notes",
-                        "\n•Click **Auto Fulfill** to be redirected to Torn payment page\n" +
+                        "\n" + "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
                                 "• Use **Manual Fulfill** if you prefer to pay manually\n" +
                                 "• Links become invalid once claimed by someone\n" +
                                 "• Unclaimed requests reset after 1 hour.",
@@ -134,7 +136,7 @@ public class DiscordMessages {
                 ))
                 .setColor(Colors.GREEN)
                 .addField("__Quick Actions__",
-                        "\n👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                        "\n\n" + "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -162,7 +164,7 @@ public class DiscordMessages {
                 )
                 .setColor(Colors.CYAN)
                 .addField("__Quick Actions__",
-                        "\n👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                        "\n\n" + "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -225,7 +227,7 @@ public class DiscordMessages {
                 .setTitle("🔫 OC2 Items Required")
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
-                .addField("__Quick Actions__", "\n" + quickActions, false)
+                .addField("__Quick Actions__", "\n\n" + quickActions, false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
@@ -281,8 +283,8 @@ public class DiscordMessages {
                 .setTitle("💎 OC2 Item Rewards")
                 .setDescription(description.toString())
                 .setColor(Colors.PURPLE)
-                .addField("Quick Actions",
-                        "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury)\n\n" +
+                .addField("__Quick Actions__",
+                        "\n\n" + "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -320,6 +322,63 @@ public class DiscordMessages {
         public String toString() {
             return String.format("%s x%d", itemName, quantity);
         }
+    }
+
+    /**
+     * Alternative method to send assignments to all members instead of just OC managers
+     */
+    public static boolean sendCrimeAssignmentToAllMembers(CrimeAssignmentOptimizer.FactionInfo factionInfo,
+                                                          CrimeAssignmentOptimizer.AssignmentRecommendation recommendation,
+                                                          Map<String, CrimeAssignmentOptimizer.DiscordMemberMapping> memberMappings) {
+
+        // Same message creation logic as above...
+        List<CrimeAssignmentOptimizer.MemberSlotAssignment> assignments = recommendation.getImmediateAssignments();
+        Map<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> assignmentsByCrime = assignments.stream()
+                .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName()));
+
+        StringBuilder description = new StringBuilder();
+        description.append("**Your Optimal Crime Assignments**\n\n");
+
+        Set<String> mentionedUsers = new HashSet<>();
+
+        for (Map.Entry<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> crimeEntry : assignmentsByCrime.entrySet()) {
+            String crimeName = crimeEntry.getKey();
+            List<CrimeAssignmentOptimizer.MemberSlotAssignment> crimeAssignments = crimeEntry.getValue();
+
+            description.append(String.format("**🎯 %s**\n", crimeName));
+
+            for (CrimeAssignmentOptimizer.MemberSlotAssignment assignment : crimeAssignments) {
+                String userId = assignment.getMember().getUserId();
+                CrimeAssignmentOptimizer.DiscordMemberMapping memberMapping = memberMappings.get(userId);
+
+                if (memberMapping != null) {
+                    String mention = memberMapping.getMention();
+                    mentionedUsers.add(mention);
+
+                    description.append(String.format("• **%s** → %s\n",
+                            assignment.getSlot().getSlotPosition(),
+                            mention));
+                }
+            }
+            description.append("\n");
+        }
+
+        SendDiscordMessage.DiscordEmbed embed = new SendDiscordMessage.DiscordEmbed()
+                .setTitle("🎯 OC2 Crime & Role Assignments")
+                .setDescription(description.toString())
+                .setColor(Colors.GOLD)
+                .setFooter("OC2 Management System", null)
+                .setTimestamp(java.time.Instant.now().toString());
+
+        String allMentions = String.join(" ", mentionedUsers);
+
+        // Send without role restrictions - goes to general webhook
+        return SendDiscordMessage.sendMessageNoRole(
+                factionInfo.getFactionId(),
+                allMentions,
+                embed,
+                "OC2 MAnager"
+        );
     }
 
     @NotNull

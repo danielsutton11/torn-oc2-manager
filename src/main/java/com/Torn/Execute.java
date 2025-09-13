@@ -21,6 +21,7 @@ import static com.Torn.FactionCrimes.Completed.GetCompletedData.fetchAndProcessA
 import static com.Torn.FactionCrimes.Completed.GetPaidCrimesData.fetchAndProcessAllPaidCrimes;
 import static com.Torn.FactionCrimes.Available.GetAvailableMembers.fetchAndProcessAllAvailableMembers;
 import static com.Torn.FactionCrimes.Completed.GetTornStatsCPR.updateAllFactionsCPRFromTornStats;
+import static com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer.sendDiscordAssignmentNotifications;
 import static com.Torn.FactionCrimes._Overview.UpdateOverviewData.updateAllFactionsOverviewData;
 import static com.Torn.FactionMembers.SyncMembers.syncFactionMembers;
 import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactionsCPR;
@@ -112,6 +113,7 @@ public class Execute {
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
                     fetchAndProcessAllAvailableMembers();
+                    sendDiscordAssignmentNotifications();
                     break;
 
                 default:

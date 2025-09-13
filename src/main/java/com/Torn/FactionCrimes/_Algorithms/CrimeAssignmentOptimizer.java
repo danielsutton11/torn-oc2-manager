@@ -9,6 +9,7 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
+import com.Torn.Discord.Messages.DiscordMessages;
 
 /**
  * Algorithmic optimizer for assigning available members to available crime slots
@@ -855,98 +856,148 @@ public class CrimeAssignmentOptimizer {
         return recommendations;
     }
 
-    /**
-     * Export optimization results for external tools or Discord notifications
-     */
-    public static class OptimizationExport {
-        private final String factionId;
-        private final List<String> topAssignments;
-        private final String summary;
-        private final Map<String, Object> metrics;
 
-        public OptimizationExport(String factionId, List<String> topAssignments, String summary, Map<String, Object> metrics) {
-            this.factionId = factionId;
-            this.topAssignments = topAssignments;
-            this.summary = summary;
-            this.metrics = metrics;
+    /**
+     * Discord member mapping from the members table
+     */
+    public static class DiscordMemberMapping {
+        private final String userId;
+        private final String username;
+        private final String discordId;
+
+        public DiscordMemberMapping(String userId, String username, String discordId) {
+            this.userId = userId;
+            this.username = username;
+            this.discordId = discordId;
         }
 
-        public String getFactionId() { return factionId; }
-        public List<String> getTopAssignments() { return topAssignments; }
-        public String getSummary() { return summary; }
-        public Map<String, Object> getMetrics() { return metrics; }
-    }
+        public String getUserId() { return userId; }
+        public String getUsername() { return username; }
+        public String getDiscordId() { return discordId; }
 
-    /**
-     * Export results in a format suitable for Discord or web display (urgency-free)
-     */
-    public static OptimizationExport exportOptimizationResults(AssignmentRecommendation recommendation,
-                                                               FactionInfo factionInfo) {
-        // Top 10 assignments for display
-        List<String> topAssignments = recommendation.getImmediateAssignments().stream()
-                .limit(10)
-                .map(assignment -> String.format("• %s → %s (%s) - Score: %.2f",
-                        assignment.getMember().getUsername(),
-                        assignment.getSlot().getCrimeName(),
-                        assignment.getSlot().getSlotPosition(),
-                        assignment.getOptimizationScore()))
-                .collect(Collectors.toList());
-
-        // Summary statistics (urgency metrics removed)
-        String summary = String.format(
-                "Optimization Results for Faction %s:\n" +
-                        "• %d optimal assignments identified\n" +
-                        "• Total expected value: $%,.0f\n" +
-                        "• Average assignment score: %.3f\n" +
-                        "• Strategic recommendations: %d",
-                factionInfo.getFactionId(),
-                recommendation.getImmediateAssignments().size(),
-                (double) recommendation.getTotalExpectedValue(),
-                recommendation.getImmediateAssignments().stream()
-                        .mapToDouble(MemberSlotAssignment::getOptimizationScore)
-                        .average().orElse(0.0),
-                recommendation.getStrategicRecommendations().size());
-
-        // Metrics for analysis (urgency metrics removed)
-        Map<String, Object> metrics = new HashMap<>();
-        metrics.put("totalAssignments", recommendation.getImmediateAssignments().size());
-        metrics.put("totalExpectedValue", recommendation.getTotalExpectedValue());
-        metrics.put("averageScore", recommendation.getImmediateAssignments().stream()
-                .mapToDouble(MemberSlotAssignment::getOptimizationScore).average().orElse(0.0));
-        metrics.put("highValueCrimes", recommendation.getImmediateAssignments().stream()
-                .filter(a -> a.getSlot().getExpectedValue() > 20_000_000L).count());
-        metrics.put("highPrioritySlots", recommendation.getImmediateAssignments().stream()
-                .filter(a -> a.getSlot().getSlotPriority() > 1.8).count());
-
-        return new OptimizationExport(factionInfo.getFactionId(), topAssignments, summary, metrics);
-    }
-
-    /**
-     * Simple test method for the optimization algorithm (urgency-free)
-     */
-    public static void testOptimizationAlgorithm(String factionId) {
-        logger.info("Testing urgency-free optimization algorithm for faction: {}", factionId);
-
-        // Create sample data for testing
-        List<AvailableMember> testMembers = Arrays.asList(
-                new AvailableMember("123", "TestUser1",
-                        Map.of("Break the Bank|Robber", 85, "Break the Bank|Muscle", 70), null),
-                new AvailableMember("456", "TestUser2",
-                        Map.of("Break the Bank|Robber", 75, "Break the Bank|Muscle", 90), null)
-        );
-
-        List<AvailableCrimeSlot> testSlots = Arrays.asList(
-                new AvailableCrimeSlot(1L, "Break the Bank", "Robber", "1", 8,
-                        new Timestamp(System.currentTimeMillis() + 24*60*60*1000), 25_000_000L, 2.0),
-                new AvailableCrimeSlot(1L, "Break the Bank", "Muscle", "2", 8,
-                        new Timestamp(System.currentTimeMillis() + 24*60*60*1000), 25_000_000L, 1.6)
-        );
-
-        OptimizationResult result = optimizeAssignments(testMembers, testSlots);
-        logger.info("Test result (urgency-free): {}", result);
-
-        for (MemberSlotAssignment assignment : result.getAssignments()) {
-            logger.info("Test assignment: {}", assignment);
+        public String getMention() {
+            return discordId != null ? "<@" + discordId + ">" : username;
         }
     }
+
+    /**
+     * Send Discord assignment notifications for all factions
+     */
+    public static void sendDiscordAssignmentNotifications() throws SQLException {
+        logger.info("Sending Discord crime assignment notifications to all factions");
+
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+
+        if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
+        }
+
+        if (ocDataDatabaseUrl == null || ocDataDatabaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL_OC_DATA environment variable not set");
+        }
+
+        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
+             Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+
+            logger.info("Database connections established successfully");
+
+            List<FactionInfo> factions = getFactionInfo(configConnection);
+            if (factions.isEmpty()) {
+                logger.warn("No OC2-enabled factions found for Discord notifications");
+                return;
+            }
+
+            int successfulNotifications = 0;
+            int failedNotifications = 0;
+
+            for (FactionInfo factionInfo : factions) {
+                try {
+                    boolean success = sendFactionAssignmentNotification(configConnection, ocDataConnection, factionInfo);
+                    if (success) {
+                        successfulNotifications++;
+                        logger.info("✓ Sent Discord assignment notification to faction {}", factionInfo.getFactionId());
+                    } else {
+                        failedNotifications++;
+                        logger.warn("✗ Failed to send Discord assignment notification to faction {}", factionInfo.getFactionId());
+                    }
+
+                } catch (Exception e) {
+                    failedNotifications++;
+                    logger.error("Error sending Discord notification to faction {}: {}",
+                            factionInfo.getFactionId(), e.getMessage(), e);
+                }
+            }
+
+            logger.info("Discord assignment notifications completed: {} successful, {} failed",
+                    successfulNotifications, failedNotifications);
+
+        } catch (SQLException e) {
+            logger.error("Database error during Discord assignment notifications", e);
+            throw e;
+        }
+    }
+
+    /**
+     * Send Discord assignment notification for a single faction
+     */
+    private static boolean sendFactionAssignmentNotification(Connection configConnection,
+                                                             Connection ocDataConnection,
+                                                             FactionInfo factionInfo) throws SQLException {
+
+        // Generate assignment recommendations
+        AssignmentRecommendation recommendation = generateAssignmentRecommendations(
+                configConnection, ocDataConnection, factionInfo);
+
+        if (recommendation.getImmediateAssignments().isEmpty()) {
+            logger.debug("No assignments to notify for faction {}", factionInfo.getFactionId());
+            return true; // Not an error, just nothing to send
+        }
+
+        // Load Discord member mappings
+        Map<String, DiscordMemberMapping> memberMappings = loadDiscordMemberMappings(
+                ocDataConnection, factionInfo);
+
+        if (memberMappings.isEmpty()) {
+            logger.warn("No Discord member mappings found for faction {}", factionInfo.getFactionId());
+            return false;
+        }
+
+        // Create and send Discord message
+        return DiscordMessages.sendCrimeAssignmentToAllMembers(factionInfo, recommendation, memberMappings);
+    }
+
+    /**
+     * Load Discord member mappings from the members table
+     */
+    private static Map<String, DiscordMemberMapping> loadDiscordMemberMappings(Connection ocDataConnection,
+                                                                               FactionInfo factionInfo) throws SQLException {
+        Map<String, DiscordMemberMapping> mappings = new HashMap<>();
+        String membersTable = "members_" + factionInfo.getDbSuffix();
+
+        String sql = "SELECT user_id, username, discord_id FROM " + membersTable +
+                " WHERE discord_id IS NOT NULL AND discord_id != ''";
+
+        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String userId = rs.getString("user_id");
+                String username = rs.getString("username");
+                String discordId = rs.getString("discord_id");
+
+                if (userId != null && discordId != null && !discordId.trim().isEmpty()) {
+                    mappings.put(userId, new DiscordMemberMapping(userId, username, discordId.trim()));
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("Could not load Discord member mappings for faction {} (table might not exist): {}",
+                    factionInfo.getFactionId(), e.getMessage());
+        }
+
+        logger.debug("Loaded {} Discord member mappings for faction {}", mappings.size(), factionInfo.getFactionId());
+        return mappings;
+    }
+
+
 }
