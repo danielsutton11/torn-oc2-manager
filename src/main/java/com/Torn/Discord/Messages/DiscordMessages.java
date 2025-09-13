@@ -331,7 +331,6 @@ public class DiscordMessages {
                                                           CrimeAssignmentOptimizer.AssignmentRecommendation recommendation,
                                                           Map<String, CrimeAssignmentOptimizer.DiscordMemberMapping> memberMappings) {
 
-        // Same message creation logic as above...
         List<CrimeAssignmentOptimizer.MemberSlotAssignment> assignments = recommendation.getImmediateAssignments();
         Map<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> assignmentsByCrime = assignments.stream()
                 .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName()));
@@ -377,7 +376,7 @@ public class DiscordMessages {
                 factionInfo.getFactionId(),
                 allMentions,
                 embed,
-                "OC2 MAnager"
+                "OC2 Manager"
         );
     }
 

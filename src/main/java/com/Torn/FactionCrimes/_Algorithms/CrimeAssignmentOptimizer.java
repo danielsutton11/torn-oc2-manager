@@ -731,7 +731,12 @@ public class CrimeAssignmentOptimizer {
 
         OptimizationResult result = optimizeFactionCrimeAssignments(configConnection, ocDataConnection, factionInfo);
 
-        if (result == null || result.getAssignments().isEmpty()) {
+        logger.info("DEBUG: Optimization result - {} assignments, {} unfilled slots, {} unassigned members",
+                result.getAssignments().size(),
+                result.getUnfilledSlots(),
+                result.getUnassignedMembers());
+
+        if (result.getAssignments().isEmpty()) {
             return new AssignmentRecommendation(new ArrayList<>(),
                     List.of("No optimal assignments found"), new HashMap<>(), 0L);
         }
@@ -948,6 +953,11 @@ public class CrimeAssignmentOptimizer {
         // Generate assignment recommendations
         AssignmentRecommendation recommendation = generateAssignmentRecommendations(
                 configConnection, ocDataConnection, factionInfo);
+
+        // TEMPORARY DEBUG
+        logger.info("URGENT DEBUG - Faction {}: {} assignments found",
+                factionInfo.getFactionId(),
+                recommendation.getImmediateAssignments().size());
 
         if (recommendation.getImmediateAssignments().isEmpty()) {
             logger.debug("No assignments to notify for faction {}", factionInfo.getFactionId());
