@@ -3,16 +3,25 @@ package com.Torn.Discord.Messages;
 import com.Torn.Discord.Messages.SendDiscordMessage.DiscordEmbed;
 import com.Torn.Discord.Messages.SendDiscordMessage.RoleType;
 import com.Torn.Discord.Messages.SendDiscordMessage.Colors;
+import com.Torn.Execute;
 import com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer;
 import com.Torn.Helpers.Constants;
 import org.apache.tomcat.util.bcel.Const;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class DiscordMessages {
+
+    private static final Logger logger = LoggerFactory.getLogger(DiscordMessages.class);
 
 
     /**
@@ -57,7 +66,7 @@ public class DiscordMessages {
                 RoleType.BANKER,
                 null, // No additional text message
                 embed,
-                "OC2 Payment Manager" // Custom bot name
+                "OC2 Manager" // Custom bot name
         );
     }
 
@@ -332,34 +341,59 @@ public class DiscordMessages {
                                                           Map<String, CrimeAssignmentOptimizer.DiscordMemberMapping> memberMappings) {
 
         List<CrimeAssignmentOptimizer.MemberSlotAssignment> assignments = recommendation.getImmediateAssignments();
+
+        if (assignments.isEmpty()) {
+            logger.debug("No assignments found for faction {}", factionInfo.getFactionId());
+            return true;
+        }
+
         Map<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> assignmentsByCrime = assignments.stream()
                 .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName()));
 
         StringBuilder description = new StringBuilder();
-        description.append("**Your Optimal Crime Assignments**\n\n");
+        description.append("The following users should join the following crimes, in the specified slots:*\n\n");
 
         Set<String> mentionedUsers = new HashSet<>();
-
+        Set<String> usersNotInDiscord = new HashSet<>();
         for (Map.Entry<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> crimeEntry : assignmentsByCrime.entrySet()) {
             String crimeName = crimeEntry.getKey();
             List<CrimeAssignmentOptimizer.MemberSlotAssignment> crimeAssignments = crimeEntry.getValue();
 
-            description.append(String.format("**🎯 %s**\n", crimeName));
+            // Skip crimes with no assignments (this shouldn't happen with the groupBy, but safety check)
+            if (crimeAssignments == null || crimeAssignments.isEmpty()) {
+                continue;
+            }
+
+            description.append(String.format("**🎯 %s**\n\n", crimeName));
 
             for (CrimeAssignmentOptimizer.MemberSlotAssignment assignment : crimeAssignments) {
                 String userId = assignment.getMember().getUserId();
+                String username = assignment.getMember().getUsername();
                 CrimeAssignmentOptimizer.DiscordMemberMapping memberMapping = memberMappings.get(userId);
 
                 if (memberMapping != null) {
+                    // User has Discord mapping - use mention
                     String mention = memberMapping.getMention();
                     mentionedUsers.add(mention);
 
                     description.append(String.format("• **%s** → %s\n",
                             assignment.getSlot().getSlotPosition(),
                             mention));
+                } else {
+                    // User not in Discord - use plain username and track them
+                    usersNotInDiscord.add(username);
+
+                    description.append(String.format("• **%s** → **%s** *(not in Discord)*\n",
+                            assignment.getSlot().getSlotPosition(),
+                            username));
                 }
             }
             description.append("\n");
+        }
+
+        if (description.toString().trim().equals("**Your Optimal Crime Assignments**")) {
+            logger.debug("No valid assignments to display for faction {}", factionInfo.getFactionId());
+            return true;
         }
 
         SendDiscordMessage.DiscordEmbed embed = new SendDiscordMessage.DiscordEmbed()
@@ -369,15 +403,63 @@ public class DiscordMessages {
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
-        String allMentions = String.join(" ", mentionedUsers);
+        // Determine message content based on whether there are users not in Discord
+        String messageContent = null;
 
-        // Send without role restrictions - goes to general webhook
+        if (!usersNotInDiscord.isEmpty()) {
+            // Some users are not in Discord - tag OC managers
+            try {
+                messageContent = getOCManagerMention(factionInfo.getFactionId()) +
+                        " Some users are not in Discord, please message them directly.";
+            } catch (Exception e) {
+                logger.warn("Could not get OC Manager mention for faction {}: {}",
+                        factionInfo.getFactionId(), e.getMessage());
+                messageContent = "Some users are not in Discord, please message them directly.";
+            }
+        }
+        // If all users are in Discord, messageContent stays null (no extra message)
+
         return SendDiscordMessage.sendMessageNoRole(
                 factionInfo.getFactionId(),
-                allMentions,
+                messageContent, // null if everyone in Discord, OC manager mention if not
                 embed,
                 "OC2 Manager"
         );
+    }
+
+    /**
+     * Get OC Manager role mention for a faction
+     */
+    private static String getOCManagerMention(String factionId) throws SQLException {
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
+        }
+
+        String sql = "SELECT oc_manager_role_id FROM " + Constants.TABLE_NAME_DISCORD_ROLES_WEBHOOKS +
+                " WHERE faction_id = ?";
+
+        try (Connection connection = Execute.postgres.connect(configDatabaseUrl, logger);
+             PreparedStatement pstmt = connection.prepareStatement(sql)) {
+
+            try {
+                long factionIdLong = Long.parseLong(factionId);
+                pstmt.setLong(1, factionIdLong);
+            } catch (NumberFormatException e) {
+                pstmt.setString(1, factionId);
+            }
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String ocManagerRoleId = rs.getString("oc_manager_role_id");
+                    if (ocManagerRoleId != null && !ocManagerRoleId.trim().isEmpty()) {
+                        return "<@&" + ocManagerRoleId.trim() + ">";
+                    }
+                }
+            }
+        }
+
+        throw new IllegalStateException("No OC Manager role configured for faction " + factionId);
     }
 
     @NotNull
