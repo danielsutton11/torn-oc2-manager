@@ -200,7 +200,7 @@ public class PaymentController {
                 "        <div class=\"details\">\n" +
                 "            <strong>Recipient:</strong> " + request.getUsername() + " [" + request.getUserId() + "]<br>\n" +
                 "            <strong>Item:</strong> " + request.getItemRequired() + "<br>\n" +
-                "            <strong>Request ID:</strong> " + request.getRequestId().substring(0, 8) + "...\n" +
+                "            <strong>Request ID:</strong> " + request.getRequestId() + "\n" + // Show full ID
                 "        </div>\n" +
                 "        <div class=\"countdown\">Redirecting to Torn in <span id=\"countdown\">3</span> seconds...</div>\n" +
                 "        <div class=\"manual-link\">\n" +
@@ -256,7 +256,7 @@ public class PaymentController {
                 "        <div class=\"details\">\n" +
                 "            <strong>Recipient:</strong> " + request.getUsername() + " [" + request.getUserId() + "]<br>\n" +
                 "            <strong>Item:</strong> " + request.getItemRequired() + "<br>\n" +
-                "            <strong>Request ID:</strong> " + request.getRequestId().substring(0, 8) + "...\n" +
+                "            <strong>Request ID:</strong> " + request.getRequestId() + "\n" + // Show full ID
                 "        </div>\n" +
                 "        <div class=\"instructions\">\n" +
                 "            <h3>Payment Instructions:</h3>\n" +
@@ -273,7 +273,7 @@ public class PaymentController {
                 "            <a href=\"https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user\" target=\"_blank\">Go to Torn Faction Controls</a>\n" +
                 "        </div>\n" +
                 "        <div class=\"warning\">\n" +
-                "            ⚠️ This request expires in 15 minutes\n" +
+                "            ⚠️ This request expires in 1 hour\n" +
                 "        </div>\n" +
                 "    </div>\n" +
                 "</body>\n" +
@@ -303,7 +303,7 @@ public class PaymentController {
                 "        <h1>Request Already Claimed</h1>\n" +
                 "        <div class=\"message\">\n" +
                 "            This payment request has already been claimed by someone else.<br>\n" +
-                "            Request ID: " + requestId.substring(0, 8) + "...\n" +
+                "            Request ID: " + requestId + "\n" + // Show full ID
                 "        </div>\n" +
                 "        <p>If you believe this is an error, please contact your faction leadership.</p>\n" +
                 "    </div>\n" +
@@ -337,7 +337,7 @@ public class PaymentController {
                 "        <h1 style=\"text-align: center;\">Payment Request Status</h1>\n" +
                 "        <div class=\"status\">" + statusText + "</div>\n" +
                 "        <div class=\"details\">\n" +
-                "            <div class=\"detail-row\"><strong>Request ID:</strong> " + request.getRequestId().substring(0, 8) + "...</div>\n" +
+                "            <div class=\"detail-row\"><strong>Request ID:</strong> " + request.getRequestId() + "</div>\n" + // Show full ID
                 "            <div class=\"detail-row\"><strong>Recipient:</strong> " + request.getUsername() + " [" + request.getUserId() + "]</div>\n" +
                 "            <div class=\"detail-row\"><strong>Item:</strong> " + request.getItemRequired() + "</div>\n" +
                 "            <div class=\"detail-row\"><strong>Amount:</strong> $" + String.format("%,d", request.getItemValue()) + "</div>\n" +
@@ -351,6 +351,7 @@ public class PaymentController {
                 "</body>\n" +
                 "</html>";
     }
+
 
     /**
      * Create error page

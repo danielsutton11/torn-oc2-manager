@@ -24,7 +24,7 @@ public class DiscordMessages {
                                                long amount) {
 
         DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("💰 Payment Request #" + requestId.substring(0, 8) + "...")
+                .setTitle("💰 Payment Request #" + requestId)
                 .setDescription(String.format(
                         "**%s [%s]** needs payment for an OC item they already had:\n\n" +
                                 "💎 **Item:** %s\n" +
@@ -44,9 +44,9 @@ public class DiscordMessages {
                         "\n•Click **Auto Fulfill** to be redirected to Torn payment page\n" +
                                 "• Use **Manual Fulfill** if you prefer to pay manually\n" +
                                 "• Links become invalid once claimed by someone\n" +
-                                "• Unclaimed requests reset after 15 minutes",
+                                "• Unclaimed requests reset after 1 hour.",
                         false)
-                .setFooter("OC2 Payment System • Request expires 15 minutes after being claimed", null)
+                .setFooter("OC2 Payment System • Request expires 1 after being claimed if not paid", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
         // Send to bankers with custom username
@@ -70,13 +70,14 @@ public class DiscordMessages {
                                                long amount) {
 
         DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("💰 Payment Fulfilled #" + requestId.substring(0, 8) + "...")
+                .setTitle("💰 Payment Fulfilled #" + requestId)
                 .setDescription(String.format(
                         "The payment to **%s [%s]** has been fulfilled:\n\n" +
                                 "💎 **Item:** %s\n" +
                                 "💵 **Amount:** %s\n",
                         playerName, playerId, itemName, formatCurrency(amount)
                 ))
+                .addField("Status", "✅ **COMPLETED**", true)
                 .setColor(Colors.GREEN)
                 .setFooter("OC2 Payment System", null)
                 .setTimestamp(java.time.Instant.now().toString());
@@ -102,8 +103,8 @@ public class DiscordMessages {
                         crimeName, itemQuantity
                 ))
                 .setColor(Colors.ORANGE)
-                .addField("Quick Actions",
-                        "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
+                .addField("__Quick Actions__",
+                        "\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -132,8 +133,8 @@ public class DiscordMessages {
                         crimeName
                 ))
                 .setColor(Colors.GREEN)
-                .addField("Quick Actions",
-                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                .addField("__Quick Actions__",
+                        "\n👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -160,8 +161,8 @@ public class DiscordMessages {
                         "There are currently insufficient organised crimes available, please spawn some more!\n"
                 )
                 .setColor(Colors.CYAN)
-                .addField("Quick Actions",
-                        "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                .addField("__Quick Actions__",
+                        "\n👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -224,7 +225,7 @@ public class DiscordMessages {
                 .setTitle("🔫 OC2 Items Required")
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
-                .addField("Quick Actions", quickActions.toString(), false)
+                .addField("__Quick Actions__", "\n" + quickActions, false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
@@ -236,6 +237,89 @@ public class DiscordMessages {
                 embed,
                 "OC2 Manager" // Custom bot name
         );
+    }
+
+    /**
+     * Send item rewards notification to leadership when crime rewards items (excluding Xanax)
+     */
+    public static boolean sendLeaderItemRewards(String factionId, String crimeName, List<ItemReward> itemRewards) {
+
+        if (itemRewards == null || itemRewards.isEmpty()) {
+            return true;
+        }
+
+        // Build dynamic description with item details
+        StringBuilder description = new StringBuilder();
+        description.append(String.format(
+                "The crime **%s** has rewarded the following items. Please withdraw from the armoury as soon as possible.\n\n",
+                crimeName
+        ));
+
+        long totalValue = 0;
+        for (ItemReward reward : itemRewards) {
+            description.append(String.format(
+                    "💎 **%s** x%d",
+                    reward.getItemName(),
+                    reward.getQuantity()
+            ));
+
+            if (reward.getAveragePrice() != null && reward.getAveragePrice() > 0) {
+                long itemTotalValue = reward.getAveragePrice().longValue() * reward.getQuantity();
+                totalValue += itemTotalValue;
+                description.append(String.format(" (≈%s total)", formatCurrency(itemTotalValue)));
+            }
+
+            description.append("\n");
+        }
+
+        // Add total value if we have pricing data
+        if (totalValue > 0) {
+            description.append(String.format("\n**Total Estimated Value:** %s", formatCurrency(totalValue)));
+        }
+
+        DiscordEmbed embed = new DiscordEmbed()
+                .setTitle("💎 OC2 Item Rewards")
+                .setDescription(description.toString())
+                .setColor(Colors.PURPLE)
+                .addField("Quick Actions",
+                        "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury)\n\n" +
+                                "✅ **Mark as Fulfilled** (React with ✅)",
+                        false)
+                .setFooter("OC2 Management System", null)
+                .setTimestamp(java.time.Instant.now().toString());
+
+        // Send to Leadership
+        return SendDiscordMessage.sendToRole(
+                factionId,
+                RoleType.LEADERSHIP,
+                null, // No additional text message
+                embed,
+                "OC2 Manager" // Custom bot name
+        );
+    }
+
+    /**
+     * Helper class to represent item rewards
+     */
+    public static class ItemReward {
+        private final String itemName;
+        private final int quantity;
+        private final Integer averagePrice;
+
+        public ItemReward(String itemName, int quantity, Integer averagePrice) {
+            this.itemName = itemName;
+            this.quantity = quantity;
+            this.averagePrice = averagePrice;
+        }
+
+        public String getItemName() { return itemName; }
+        public int getQuantity() { return quantity; }
+        public Integer getAveragePrice() { return averagePrice; }
+
+        @Override
+        public String toString() {
+            return String.format("%s x%d", itemName, quantity);
+        }
     }
 
     @NotNull

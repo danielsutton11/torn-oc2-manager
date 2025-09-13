@@ -765,6 +765,54 @@ public class GetCompletedData {
                             crime.getId());
                 }
 
+                // Send item rewards notification for non-Xanax items (only for NEW crimes)
+                if (isNewCrime && items != null && !items.isEmpty()) {
+                    List<DiscordMessages.ItemReward> nonXanaxRewards = new ArrayList<>();
+
+                    for (int i = 0; i < items.size(); i++) {
+                        Map<String, Object> item = items.get(i);
+                        Number itemIdNum = (Number) item.get(Constants.NODE_ID);
+                        Number quantityNum = (Number) item.get(Constants.NODE_QUANTITY);
+
+                        if (itemIdNum != null && quantityNum != null) {
+                            Long itemId = itemIdNum.longValue();
+                            int quantity = quantityNum.intValue();
+
+                            ItemMarketData itemData = getItemMarketData(itemId, apiKey);
+
+                            if (itemData != null && itemData.getName() != null) {
+                                // Skip Xanax - we already handle that separately
+                                if (!itemData.getName().equalsIgnoreCase("Xanax")) {
+                                    nonXanaxRewards.add(new DiscordMessages.ItemReward(
+                                            itemData.getName(),
+                                            quantity,
+                                            itemData.getAveragePrice()
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    // Send notification if we have non-Xanax items
+                    if (!nonXanaxRewards.isEmpty()) {
+                        logger.info("NEW crime {} rewarded {} non-Xanax items - sending item rewards notification",
+                                crime.getId(), nonXanaxRewards.size());
+
+                        boolean itemNotificationSent = DiscordMessages.sendLeaderItemRewards(
+                                String.valueOf(factionIdLong),
+                                crime.getName(),
+                                nonXanaxRewards
+                        );
+
+                        if (itemNotificationSent) {
+                            logger.info("✓ Sent item rewards notification for NEW crime {} ({} items)",
+                                    crime.getId(), nonXanaxRewards.size());
+                        } else {
+                            logger.warn("✗ Failed to send item rewards notification for crime {}", crime.getId());
+                        }
+                    }
+                }
+
                 itemsString = itemsBuilder.toString();
                 crimeValue += totalItemValue;
             }

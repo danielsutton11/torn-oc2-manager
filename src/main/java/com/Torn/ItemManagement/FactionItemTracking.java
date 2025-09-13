@@ -64,7 +64,10 @@ public class FactionItemTracking {
     /**
      * Log faction item purchase requirement (from CheckUsersHaveItems)
      */
-    public static void logFactionPurchaseRequired(Connection ocDataConnection, String factionSuffix,
+    /**
+     * Log faction item purchase requirement (from CheckUsersHaveItems)
+     */
+    public static void logFactionPurchaseRequired(Connection ocDataConnection, String factionSuffix, String userId, String username,
                                                   String crimeName, String itemName, Long itemPrice) throws SQLException {
         String tableName = "item_tracking_" + factionSuffix;
 
@@ -74,21 +77,23 @@ public class FactionItemTracking {
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
                 "faction_paid_member, notes, last_updated) " +
-                "VALUES (?, NULL, NULL, ?, ?, TRUE, NULL, ?, CURRENT_TIMESTAMP)";
+                "VALUES (?, ?, ?, ?, ?, TRUE, NULL, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
             pstmt.setString(1, crimeName);
-            pstmt.setString(2, itemName);
+            pstmt.setString(2, userId);
+            pstmt.setString(3, username);
+            pstmt.setString(4, itemName);
             if (itemPrice != null) {
-                pstmt.setLong(3, itemPrice);
+                pstmt.setLong(5, itemPrice);
             } else {
-                pstmt.setNull(3, Types.BIGINT);
+                pstmt.setNull(5, Types.BIGINT);
             }
-            pstmt.setString(4, "Faction needs to purchase this item for members");
+            pstmt.setString(6, "Faction Purchase"); // Fixed: More descriptive note
 
             pstmt.executeUpdate();
-            logger.debug("Logged faction purchase requirement: {} for crime {} (price: ${})",
-                    itemName, crimeName, itemPrice);
+            logger.debug("Logged faction purchase requirement: {} for user {} in crime {} (price: ${})",
+                    itemName, username, crimeName, itemPrice);
         }
     }
 
@@ -119,11 +124,11 @@ public class FactionItemTracking {
                 pstmt.setNull(5, Types.BIGINT);
             }
             pstmt.setString(6, paymentRequestId);
-            pstmt.setString(7, "Member payment required - request created");
+            pstmt.setString(7, "Member payment");
 
             pstmt.executeUpdate();
             logger.debug("Logged member payment requirement: {} for user {} in crime {} (request: {})",
-                    itemName, username, crimeName, paymentRequestId != null ? paymentRequestId.substring(0, 8) + "..." : "none");
+                    itemName, username, crimeName, paymentRequestId); // Now shows full 6-digit ID
         }
     }
 

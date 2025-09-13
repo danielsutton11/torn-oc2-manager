@@ -216,7 +216,7 @@ public class GetTornStatsCPR {
             while (rs.next()) {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
-                String tornStatsApiKey = rs.getString("tornstats_api_key");
+                String tornStatsApiKey = rs.getString("api_key");
 
                 if (factionId != null && dbSuffix != null && tornStatsApiKey != null &&
                         isValidDbSuffix(dbSuffix)) {
@@ -227,8 +227,8 @@ public class GetTornStatsCPR {
                 }
             }
         } catch (SQLException e) {
-            if (e.getMessage().contains("tornstats_api_key")) {
-                logger.warn("Column 'tornstats_api_key' not found in factions table. " +
+            if (e.getMessage().contains("_api_key")) {
+                logger.warn("Column 'api_key' not found in factions table. " +
                         "Please add this column to store TornStats API keys for each faction.");
                 return new ArrayList<>();
             }

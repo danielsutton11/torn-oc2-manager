@@ -452,8 +452,10 @@ public class UpdateOverviewData {
             boolean wasNotInCrime = (existingRecord == null || !existingRecord.isInOrganisedCrime());
             boolean isNowInCrime = newRecord.isInOrganisedCrime();
             boolean userHasItem = Boolean.TRUE.equals(newRecord.getUserHasItem());
+            boolean itemIsNotReusable = Boolean.FALSE.equals(newRecord.getItemIsReusable());
 
-            if (wasNotInCrime && isNowInCrime && userHasItem && newRecord.getItemRequired() != null) {
+            // Only create payment request if item is NOT reusable
+            if (wasNotInCrime && isNowInCrime && userHasItem && newRecord.getItemRequired() != null && itemIsNotReusable) {
                 usersJoinedWithItems.add(new DiscordNotificationData.UserJoinedWithItemData(
                         newRecord.getUserId(),
                         newRecord.getUsername(),
@@ -464,21 +466,24 @@ public class UpdateOverviewData {
                         newRecord.getItemAveragePrice()
                 ));
 
-                logger.info("Detected user {} joined crime {} with item {} they already have (value: ${})",
+                logger.info("Detected user {} joined crime {} with non-reusable item {} they already have (value: ${})",
                         newRecord.getUsername(), newRecord.getCrimeId(), newRecord.getItemRequired(),
                         newRecord.getItemAveragePrice() != null ? newRecord.getItemAveragePrice() : "unknown");
+            } else if (wasNotInCrime && isNowInCrime && userHasItem && newRecord.getItemRequired() != null && Boolean.TRUE.equals(newRecord.getItemIsReusable())) {
+                // Log that user joined with reusable item (no payment needed)
+                logger.info("User {} joined crime {} with reusable item {} - no payment request needed",
+                        newRecord.getUsername(), newRecord.getCrimeId(), newRecord.getItemRequired());
             }
         }
 
         if (!usersJoinedWithItems.isEmpty()) {
-            logger.info("Found {} users who joined crimes with items they already have for faction {}",
+            logger.info("Found {} users who joined crimes with non-reusable items they already have for faction {}",
                     usersJoinedWithItems.size(), factionInfo.getFactionId());
             return new DiscordNotificationData(factionInfo.getFactionId(), factionInfo.getDbSuffix(), usersJoinedWithItems);
         }
 
         return null; // No notifications needed
     }
-
     /**
      * Get faction members from the config database
      */

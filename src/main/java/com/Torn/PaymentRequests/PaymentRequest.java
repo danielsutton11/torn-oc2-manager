@@ -87,7 +87,7 @@ public class PaymentRequest {
     public boolean isExpired() {
         if (claimedAt == null) return false;
         long timeSinceClaimed = System.currentTimeMillis() - claimedAt.getTime();
-        return timeSinceClaimed > (15 * 60 * 1000); // 15 minutes in milliseconds
+        return timeSinceClaimed > (60 * 60 * 1000); // 60 minutes in milliseconds (changed from 15)
     }
 
     public void markAsClaimed(String claimedByUserId) {

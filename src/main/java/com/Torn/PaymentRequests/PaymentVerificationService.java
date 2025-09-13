@@ -2,6 +2,7 @@ package com.Torn.PaymentRequests;
 
 import com.Torn.Api.ApiResponse;
 import com.Torn.Api.TornApiHandler;
+import com.Torn.Discord.Messages.DiscordMessages;
 import com.Torn.Execute;
 import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -282,11 +283,28 @@ public class PaymentVerificationService {
 
                             if (success) {
                                 paymentsVerified++;
-                                logger.info("✓ Verified payment for request {} - ${} to {} (news: {})",
-                                        request.getRequestId().substring(0, 8) + "...",
+                                logger.info("Verified payment for request {} - ${} to {} (news: {})",
+                                        request.getRequestId(),
                                         paymentInfo.getAmount(),
                                         paymentInfo.getRecipientName(),
                                         newsId.substring(0, 8) + "...");
+
+                                boolean notificationSent = DiscordMessages.paymentFulfilled(
+                                        request.getFactionId(),
+                                        request.getUsername(),
+                                        request.getUserId(),
+                                        request.getRequestId(),
+                                        request.getItemRequired(),
+                                        request.getItemValue()
+                                );
+
+                                if (notificationSent) {
+                                    logger.info("Sent payment fulfilled notification for request {}",
+                                            request.getRequestId());
+                                } else {
+                                    logger.warn("✗ Failed to send payment fulfilled notification for request {}",
+                                            request.getRequestId());
+                                }
                             }
                             break; // Move to next news item
                         }

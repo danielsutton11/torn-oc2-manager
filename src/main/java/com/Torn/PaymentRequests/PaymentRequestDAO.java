@@ -23,7 +23,7 @@ public class PaymentRequestDAO {
      */
     public static void createTableIfNotExists(Connection connection) throws SQLException {
         String createTableSql = "CREATE TABLE IF NOT EXISTS payment_requests (" +
-                "request_id VARCHAR(36) PRIMARY KEY," +
+                "request_id VARCHAR(6) PRIMARY KEY," + // Changed from VARCHAR(36) to VARCHAR(6)
                 "faction_id VARCHAR(20) NOT NULL," +
                 "user_id VARCHAR(20) NOT NULL," +
                 "username VARCHAR(100) NOT NULL," +
@@ -44,6 +44,9 @@ public class PaymentRequestDAO {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createTableSql);
 
+            // Create sequence for auto-incrementing IDs if it doesn't exist
+            stmt.execute("CREATE SEQUENCE IF NOT EXISTS payment_request_id_seq START 1 MAXVALUE 999999 CYCLE");
+
             // Create indexes for better performance
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_faction_id ON payment_requests(faction_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests(status)");
@@ -51,15 +54,32 @@ public class PaymentRequestDAO {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_created_at ON payment_requests(created_at)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_claimed_at ON payment_requests(claimed_at)");
 
-            logger.debug("Payment requests table created or verified with indexes");
+            logger.debug("Payment requests table created or verified with indexes and sequence");
         }
+    }
+
+    /**
+     * Generate next sequential 6-digit request ID
+     */
+    private static String generateNextRequestId(Connection connection) throws SQLException {
+        String sql = "SELECT LPAD(nextval('payment_request_id_seq')::text, 6, '0')";
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            if (rs.next()) {
+                return rs.getString(1);
+            }
+        }
+
+        throw new SQLException("Failed to generate request ID");
     }
 
     /**
      * Insert a new payment request and return the generated request ID
      */
     public static String insertPaymentRequest(Connection connection, PaymentRequest request) throws SQLException {
-        String requestId = UUID.randomUUID().toString();
+        String requestId = generateNextRequestId(connection);
         request.setRequestId(requestId);
 
         String sql = "INSERT INTO payment_requests (request_id, faction_id, user_id, username, " +
@@ -101,6 +121,7 @@ public class PaymentRequestDAO {
             }
         }
     }
+
 
     /**
      * Get payment request by ID
@@ -200,7 +221,7 @@ public class PaymentRequestDAO {
     public static List<PaymentRequest> getExpiredClaimedRequests(Connection connection) throws SQLException {
         String sql = "SELECT * FROM payment_requests " +
                 "WHERE status = 'CLAIMED' " +
-                "AND claimed_at < (CURRENT_TIMESTAMP - INTERVAL '15 minutes') " +
+                "AND claimed_at < (CURRENT_TIMESTAMP - INTERVAL '1 hour') " +
                 "ORDER BY claimed_at ASC";
 
         List<PaymentRequest> expiredRequests = new ArrayList<>();

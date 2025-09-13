@@ -192,6 +192,8 @@ public class CheckUsersHaveItems {
                     FactionItemTracking.logFactionPurchaseRequired(
                             ocDataConnection,
                             factionInfo.getDbSuffix(),
+                            request.getUserId(),
+                            request.getUsername(),
                             request.getCrimeName(),
                             request.getItemRequired(),
                             request.getItemAveragePrice() != null ? request.getItemAveragePrice().longValue() : null
