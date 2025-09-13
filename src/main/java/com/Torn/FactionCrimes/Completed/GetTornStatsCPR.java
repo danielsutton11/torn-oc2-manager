@@ -87,7 +87,7 @@ public class GetTornStatsCPR {
     }
 
     /**
-     * Main entry point for updating CPR tables with TornStats data for all factions
+     * Modified main method to try multiple keys per faction
      */
     public static void updateAllFactionsCPRFromTornStats() throws SQLException, IOException {
         logger.info("Starting TornStats CPR data fetch for all factions");
@@ -118,9 +118,9 @@ public class GetTornStatsCPR {
                 return;
             }
 
-            // Get all factions with TornStats API keys
-            List<FactionInfo> factions = getFactionInfoWithTornStatsKeys(configConnection);
-            if (factions.isEmpty()) {
+            // Get all factions with their associated API keys
+            Map<String, List<String>> factionKeysMap = getAllFactionAPIKeys(configConnection);
+            if (factionKeysMap.isEmpty()) {
                 logger.warn("No factions with TornStats API keys found");
                 return;
             }
@@ -133,39 +133,80 @@ public class GetTornStatsCPR {
             }
 
             logger.info("Found {} factions with TornStats keys and {} crime slots to process",
-                    factions.size(), crimeSlots.size());
+                    factionKeysMap.size(), crimeSlots.size());
 
             int processedCount = 0;
             int successfulCount = 0;
             int failedCount = 0;
             int totalUpdatesApplied = 0;
 
-            for (FactionInfo factionInfo : factions) {
+            // Process each faction with all its available API keys
+            for (Map.Entry<String, List<String>> entry : factionKeysMap.entrySet()) {
+                String[] factionData = entry.getKey().split("\\|");
+                String factionId = factionData[0];
+                String dbSuffix = factionData[1];
+                List<String> apiKeys = entry.getValue();
+
                 try {
-                    logger.info("Processing TornStats CPR for faction: {} ({}/{})",
-                            factionInfo.getFactionId(), processedCount + 1, factions.size());
+                    logger.info("Processing TornStats CPR for faction: {} ({}/{}) - {} API keys available",
+                            factionId, processedCount + 1, factionKeysMap.size(), apiKeys.size());
 
-                    // Fetch and process CPR data for this faction
-                    TornStatsResult result = fetchAndUpdateTornStatsCPR(ocDataConnection, factionInfo, crimeSlots);
+                    // Try each API key for this faction until one succeeds
+                    TornStatsResult result = null;
+                    boolean successWithAnyKey = false;
 
-                    if (result.isSuccess()) {
-                        logger.info("✓ Successfully processed TornStats CPR for faction {} - {} updates applied",
-                                factionInfo.getFactionId(), result.getUpdatesApplied());
+                    for (int keyIndex = 0; keyIndex < apiKeys.size(); keyIndex++) {
+                        String apiKey = apiKeys.get(keyIndex);
+
+                        try {
+                            logger.debug("Trying API key {}/{} for faction {}",
+                                    keyIndex + 1, apiKeys.size(), factionId);
+
+                            FactionInfo factionInfo = new FactionInfo(factionId, dbSuffix, apiKey);
+                            result = fetchAndUpdateTornStatsCPR(ocDataConnection, factionInfo, crimeSlots);
+
+                            if (result.isSuccess()) {
+                                logger.info("✓ Successfully processed TornStats CPR for faction {} using API key {}/{} - {} updates applied",
+                                        factionId, keyIndex + 1, apiKeys.size(), result.getUpdatesApplied());
+                                successWithAnyKey = true;
+                                break; // Success - stop trying other keys for this faction
+                            } else if (result.isCircuitBreakerOpen()) {
+                                logger.error("Circuit breaker opened during processing - stopping all factions");
+                                return; // Stop everything if circuit breaker opens
+                            } else {
+                                logger.warn("API key {}/{} failed for faction {}: {}",
+                                        keyIndex + 1, apiKeys.size(), factionId, result.getErrorMessage());
+                                // Continue to next API key for this faction
+                            }
+
+                        } catch (Exception e) {
+                            logger.warn("Exception with API key {}/{} for faction {}: {}",
+                                    keyIndex + 1, apiKeys.size(), factionId, e.getMessage());
+                            // Continue to next API key for this faction
+                        }
+
+                        // Rate limiting between API key attempts (shorter than between factions)
+                        if (keyIndex < apiKeys.size() - 1) {
+                            logger.debug("Waiting {}ms before trying next API key for faction {}",
+                                    TORN_STATS_API_RATE_LIMIT_MS / 2, factionId);
+                            Thread.sleep(TORN_STATS_API_RATE_LIMIT_MS / 2);
+                        }
+                    }
+
+                    // Final result for this faction
+                    if (successWithAnyKey && result != null) {
                         successfulCount++;
                         totalUpdatesApplied += result.getUpdatesApplied();
-                    } else if (result.isCircuitBreakerOpen()) {
-                        logger.error("Circuit breaker opened during processing - stopping remaining factions");
-                        break;
                     } else {
-                        logger.error("✗ Failed to process TornStats CPR for faction {}: {}",
-                                factionInfo.getFactionId(), result.getErrorMessage());
+                        logger.error("✗ Failed to process TornStats CPR for faction {} - all {} API keys failed",
+                                factionId, apiKeys.size());
                         failedCount++;
                     }
 
                     processedCount++;
 
                     // Rate limiting between factions (except for the last one)
-                    if (processedCount < factions.size()) {
+                    if (processedCount < factionKeysMap.size()) {
                         logger.debug("Waiting {}ms before processing next faction", TORN_STATS_API_RATE_LIMIT_MS);
                         Thread.sleep(TORN_STATS_API_RATE_LIMIT_MS);
                     }
@@ -176,14 +217,14 @@ public class GetTornStatsCPR {
                     break;
                 } catch (Exception e) {
                     logger.error("✗ Unexpected error processing TornStats CPR for faction {}: {}",
-                            factionInfo.getFactionId(), e.getMessage(), e);
+                            factionId, e.getMessage(), e);
                     failedCount++;
                 }
             }
 
             // Final summary
             logger.info("TornStats CPR update completed:");
-            logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
+            logger.info("  Total factions processed: {}/{}", processedCount, factionKeysMap.size());
             logger.info("  Successful: {}", successfulCount);
             logger.info("  Failed: {}", failedCount);
             logger.info("  Total CPR updates applied: {}", totalUpdatesApplied);
@@ -199,13 +240,12 @@ public class GetTornStatsCPR {
     }
 
     /**
-     * Get faction information with API keys from the standard api_keys table pattern
+     * Get all factions with their associated API keys (multiple keys per faction)
      */
-    private static List<FactionInfo> getFactionInfoWithTornStatsKeys(Connection configConnection) throws SQLException {
-        List<FactionInfo> factions = new ArrayList<>();
+    private static Map<String, List<String>> getAllFactionAPIKeys(Connection configConnection) throws SQLException {
+        Map<String, List<String>> factionKeysMap = new HashMap<>();
 
-        // Use the same pattern as all other classes - join factions with api_keys table
-        String sql = "SELECT DISTINCT ON (f." + Constants.COLUMN_NAME_FACTION_ID + ") " +
+        String sql = "SELECT " +
                 "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
                 "f." + Constants.COLUMN_NAME_DB_SUFFIX + ", " +
                 "ak." + Constants.COLUMN_NAME_API_KEY + " " +
@@ -223,18 +263,15 @@ public class GetTornStatsCPR {
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
                 String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
 
-                if (factionId != null && dbSuffix != null && apiKey != null &&
-                        isValidDbSuffix(dbSuffix)) {
-                    factions.add(new FactionInfo(factionId, dbSuffix, apiKey));
-                } else {
-                    logger.warn("Skipping faction with invalid data: factionId={}, dbSuffix={}, apiKey={}",
-                            factionId, dbSuffix, (apiKey == null ? "null" : "***"));
+                if (factionId != null && dbSuffix != null && apiKey != null && isValidDbSuffix(dbSuffix)) {
+                    String factionKey = factionId + "|" + dbSuffix; // Combined key for faction info
+                    factionKeysMap.computeIfAbsent(factionKey, k -> new ArrayList<>()).add(apiKey);
                 }
             }
         }
 
-        logger.info("Found {} factions with API keys for TornStats CPR update", factions.size());
-        return factions;
+        logger.info("Found {} factions with API keys for TornStats CPR update", factionKeysMap.size());
+        return factionKeysMap;
     }
 
     /**
