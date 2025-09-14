@@ -59,11 +59,6 @@ public class GetFactionMembers {
         public String getFactionId() { return factionId; }
         public String getDbSuffix() { return dbSuffix; }
         public List<String> getApiKeys() { return apiKeys; }
-
-        // Helper method to get primary API key (first one)
-        public String getPrimaryApiKey() {
-            return apiKeys.isEmpty() ? null : apiKeys.get(0);
-        }
     }
 
     public static class FactionMember {
@@ -104,7 +99,7 @@ public class GetFactionMembers {
         }
     }
 
-    public static void fetchAndProcessAllFactionMembers(Connection connection) throws SQLException, IOException {
+    public static void fetchAndProcessAllFactionMembers(Connection connection) throws SQLException {
         logger.info("Starting to fetch faction members for all factions");
 
         // Step 1: Get Discord members (with error handling)
@@ -144,23 +139,18 @@ public class GetFactionMembers {
                 // Fetch faction members
                 List<FactionMember> factionMembers = fetchFactionMembers(factionInfo);
 
-                if (factionMembers != null) {
-                    // Join with Discord data
-                    joinWithDiscordData(factionMembers, discordMemberMap);
+                // Join with Discord data
+                joinWithDiscordData(factionMembers, discordMemberMap);
 
-                    // Fetch crime experience ranks from TornStats
-                    fetchCrimeExpRanks(factionMembers, factionInfo);
+                // Fetch crime experience ranks from TornStats
+                fetchCrimeExpRanks(factionMembers, factionInfo);
 
-                    // Write to database
-                    writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
+                // Write to database
+                writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
 
-                    logger.info("Successfully processed {} members for faction {}",
-                            factionMembers.size(), factionInfo.getFactionId());
-                    successfulCount++;
-                } else {
-                    logger.error("Failed to fetch members for faction {} - skipping", factionInfo.getFactionId());
-                    failedCount++;
-                }
+                logger.info("Successfully processed {} members for faction {}",
+                        factionMembers.size(), factionInfo.getFactionId());
+                successfulCount++;
 
                 processedCount++;
 
@@ -191,61 +181,133 @@ public class GetFactionMembers {
     }
 
     /**
-     * Fetch crime experience ranks from TornStats API
+     * Fetch crime experience ranks from TornStats API with API key fallback
      */
     private static void fetchCrimeExpRanks(List<FactionMember> factionMembers, FactionInfo factionInfo) {
-        String apiKey = factionInfo.getPrimaryApiKey();
+        List<String> apiKeys = factionInfo.getApiKeys();
 
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            logger.warn("No TornStats API key configured for faction {} - using default crime_exp_rank of 100",
+        if (apiKeys.isEmpty()) {
+            logger.warn("No TornStats API keys configured for faction {} - using default crime_exp_rank of 100",
                     factionInfo.getFactionId());
             return;
         }
 
-        try {
-            logger.info("Fetching crime experience ranks from TornStats for faction {}", factionInfo.getFactionId());
+        logger.info("Fetching crime experience ranks from TornStats for faction {} with {} API key(s)",
+                factionInfo.getFactionId(), apiKeys.size());
 
-            String url = "https://www.tornstats.com/api/v2/" + apiKey + "/faction/crimes";
+        Exception lastException = null;
 
-            Request request = new Request.Builder()
-                    .url(url)
-                    .addHeader("User-Agent", "TornBot/1.0")
-                    .build();
+        // Try each API key until one succeeds
+        for (int i = 0; i < apiKeys.size(); i++) {
+            String apiKey = apiKeys.get(i).trim();
 
-            try (Response response = tornStatsClient.newCall(request).execute()) {
-                if (response.isSuccessful() && response.body() != null) {
-                    String responseBody = response.body().string();
-                    Map<String, Integer> crimeExpRanks = parseTornStatsCrimeRanks(responseBody);
-
-                    // Match crime exp ranks with faction members
-                    int matchedCount = 0;
-                    for (FactionMember member : factionMembers) {
-                        Integer crimeExpRank = crimeExpRanks.get(member.getUserId());
-                        if (crimeExpRank != null) {
-                            member.setCrimeExpRank(crimeExpRank);
-                            matchedCount++;
-                        } else {
-                            // Keep default value of 100
-                            logger.debug("No crime exp rank found for user {} [{}] - using default 100",
-                                    member.getUsername(), member.getUserId());
-                        }
-                    }
-
-                    logger.info("Matched crime exp ranks for {} of {} faction members",
-                            matchedCount, factionMembers.size());
-
-                } else {
-                    logger.warn("TornStats API request failed for faction {} - HTTP {}: {} - using default ranks",
-                            factionInfo.getFactionId(), response.code(), response.message());
-                }
+            if (apiKey.isEmpty()) {
+                logger.warn("Empty API key {} of {} for faction {} - skipping",
+                        i + 1, apiKeys.size(), factionInfo.getFactionId());
+                continue;
             }
 
-            // Rate limiting for TornStats API
-            Thread.sleep(TORNSTATS_API_RATE_LIMIT_MS);
+            logger.debug("Trying TornStats API key {} of {} for faction {}",
+                    i + 1, apiKeys.size(), factionInfo.getFactionId());
+
+            try {
+                String url = "https://www.tornstats.com/api/v2/" + apiKey + "/faction/crimes";
+
+                Request request = new Request.Builder()
+                        .url(url)
+                        .addHeader("User-Agent", "TornBot/1.0")
+                        .build();
+
+                try (Response response = tornStatsClient.newCall(request).execute()) {
+                    if (response.isSuccessful() && response.body() != null) {
+                        String responseBody = response.body().string();
+                        Map<String, Integer> crimeExpRanks = parseTornStatsCrimeRanks(responseBody);
+
+                        // If we got valid data, process it
+                        if (!crimeExpRanks.isEmpty() || isValidTornStatsResponse(responseBody)) {
+                            // Match crime exp ranks with faction members
+                            int matchedCount = 0;
+                            for (FactionMember member : factionMembers) {
+                                Integer crimeExpRank = crimeExpRanks.get(member.getUserId());
+                                if (crimeExpRank != null) {
+                                    member.setCrimeExpRank(crimeExpRank);
+                                    matchedCount++;
+                                } else {
+                                    // Keep default value of 100
+                                    logger.debug("No crime exp rank found for user {} [{}] - using default 100",
+                                            member.getUsername(), member.getUserId());
+                                }
+                            }
+
+                            logger.info("Successfully fetched crime exp ranks using API key {} of {} - matched {} of {} faction members",
+                                    i + 1, apiKeys.size(), matchedCount, factionMembers.size());
+
+                            // Rate limiting for TornStats API
+                            Thread.sleep(TORNSTATS_API_RATE_LIMIT_MS);
+                            return; // Success - exit the method
+
+                        } else {
+                            logger.warn("TornStats API key {} of {} returned empty/invalid data for faction {} - trying next key",
+                                    i + 1, apiKeys.size(), factionInfo.getFactionId());
+                            lastException = new IOException("Empty or invalid TornStats response");
+
+                        }
+
+                    } else {
+                        String errorMsg = String.format("HTTP %d: %s", response.code(), response.message());
+                        logger.warn("TornStats API key {} of {} failed for faction {} - {} - trying next key",
+                                i + 1, apiKeys.size(), factionInfo.getFactionId(), errorMsg);
+
+                        // Check if it's an authentication error (401/403) or other error
+                        if (response.code() == 401 || response.code() == 403) {
+                            lastException = new IOException("Authentication failed: " + errorMsg);
+                        } else if (response.code() >= 500) {
+                            lastException = new IOException("Server error: " + errorMsg);
+                        } else {
+                            lastException = new IOException("API error: " + errorMsg);
+                        }
+                    }
+                }
+
+
+
+            } catch (InterruptedException e) {
+                logger.warn("TornStats API request interrupted for faction {}", factionInfo.getFactionId());
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                logger.warn("Exception with TornStats API key {} of {} for faction {}: {} - trying next key",
+                        i + 1, apiKeys.size(), factionInfo.getFactionId(), e.getMessage());
+                lastException = e;
+
+            }
+        }
+
+        // All API keys failed
+        logger.error("All {} TornStats API key(s) failed for faction {} - using default crime_exp_rank of 100 for all members. Last error: {}",
+                apiKeys.size(), factionInfo.getFactionId(),
+                lastException != null ? lastException.getMessage() : "Unknown error");
+
+        // All members will keep their default crime_exp_rank of 100
+    }
+
+    /**
+     * Helper method to check if TornStats response is valid (even if empty)
+     */
+    private static boolean isValidTornStatsResponse(String responseBody) {
+        try {
+            JsonNode jsonResponse = objectMapper.readTree(responseBody);
+
+            // Check for explicit API error
+            if (jsonResponse.has("status") && !jsonResponse.get("status").asBoolean()) {
+                return false;
+            }
+
+            // If we have a members node (even if empty), it's a valid response
+            return jsonResponse.has("members");
 
         } catch (Exception e) {
-            logger.error("Error fetching crime exp ranks from TornStats for faction {}: {} - using default ranks",
-                    factionInfo.getFactionId(), e.getMessage(), e);
+            return false;
         }
     }
 
@@ -391,31 +453,21 @@ public class GetFactionMembers {
                             i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
                     lastException = new IOException("API key authentication failed: " + response.getErrorMessage());
 
-                    // Continue to next API key for authentication issues
-                    continue;
-
                 } else if (response.isTemporaryError()) {
                     logger.warn("Temporary API error with key {} of {} for faction {}: {} - trying next key",
                             i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
                     lastException = new IOException("Temporary API error: " + response.getErrorMessage());
 
-                    // Continue to next API key for temporary errors
-                    continue;
-
                 } else {
                     logger.warn("Permanent API error with key {} of {} for faction {}: {} - trying next key",
                             i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
                     lastException = new IOException("API error: " + response.getErrorMessage());
-
-                    // Continue to next API key even for "permanent" errors, as they might be key-specific
-                    continue;
                 }
 
             } catch (Exception e) {
                 logger.warn("Exception with API key {} of {} for faction {}: {} - trying next key",
                         i + 1, apiKeys.size(), factionInfo.getFactionId(), e.getMessage());
                 lastException = e instanceof IOException ? (IOException) e : new IOException(e.getMessage(), e);
-                continue;
             }
         }
 
