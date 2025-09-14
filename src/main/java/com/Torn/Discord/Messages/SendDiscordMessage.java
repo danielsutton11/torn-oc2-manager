@@ -16,12 +16,19 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-//TODO: To be tested.
 
 /**
  * Enhanced Discord webhook message sender with database-driven role and webhook support
  */
 public class SendDiscordMessage {
+
+    /**
+     * ├── SendDiscordMessage.java
+     * │   ├── Database-driven Discord webhook system
+     * │   ├── Role-based messaging (Leadership, OC Manager, Banker, Armourer)
+     * │   ├── Embed creation with rich formatting
+     * │   └── Faction-specific webhook and role configuration
+     */
 
     private static final Logger logger = LoggerFactory.getLogger(SendDiscordMessage.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();

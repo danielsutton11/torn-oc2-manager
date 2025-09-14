@@ -7,6 +7,8 @@ import com.Torn.Helpers.Constants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,12 +21,28 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+├── GetFactionMembers.java
+│   ├── Fetches faction member data from Torn API
+│   ├── Syncs with Discord data to identify Discord users
+│   └── Stores enriched member data in faction-specific tables
+ **/
+
 public class GetFactionMembers {
 
     private static final Logger logger = LoggerFactory.getLogger(GetFactionMembers.class);
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
+    private static final int TORNSTATS_API_RATE_LIMIT_MS = 1000; // Be respectful to TornStats API
+
+    // HTTP client for TornStats API calls
+    private static final OkHttpClient tornStatsClient = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build();
 
     public static class FactionInfo {
         private final String factionId;
@@ -49,6 +67,7 @@ public class GetFactionMembers {
         private boolean userInDiscord = false;
         private String userDiscordId = null;
         private String userDiscordMentionId = null;
+        private int crimeExpRank = 100; // Default to 100 if not found
 
         public FactionMember(String userId, String username) {
             this.userId = userId;
@@ -64,6 +83,8 @@ public class GetFactionMembers {
         public void setUserDiscordId(String userDiscordId) { this.userDiscordId = userDiscordId; }
         public String getUserDiscordMentionId() { return userDiscordMentionId; }
         public void setUserDiscordMentionId(String userDiscordMentionId) { this.userDiscordMentionId = userDiscordMentionId; }
+        public int getCrimeExpRank() { return crimeExpRank; }
+        public void setCrimeExpRank(int crimeExpRank) { this.crimeExpRank = crimeExpRank; }
 
         @Override
         public String toString() {
@@ -72,7 +93,8 @@ public class GetFactionMembers {
                     ", username='" + username + '\'' +
                     ", userInDiscord=" + userInDiscord +
                     ", userDiscordId='" + userDiscordId +
-                    ", userDiscordMentionId='" + userDiscordMentionId +  '\'' +
+                    ", userDiscordMentionId='" + userDiscordMentionId + '\'' +
+                    ", crimeExpRank=" + crimeExpRank +
                     '}';
         }
     }
@@ -121,6 +143,9 @@ public class GetFactionMembers {
                     // Join with Discord data
                     joinWithDiscordData(factionMembers, discordMemberMap);
 
+                    // Fetch crime experience ranks from TornStats
+                    fetchCrimeExpRanks(factionMembers, factionInfo);
+
                     // Write to database
                     writeFactionMembersToDatabase(connection, factionInfo, factionMembers);
 
@@ -158,6 +183,105 @@ public class GetFactionMembers {
         if (failedCount > successfulCount && processedCount > 2) {
             logger.error("More than half of factions failed - Torn API may be experiencing issues");
         }
+    }
+
+    /**
+     * Fetch crime experience ranks from TornStats API
+     */
+    private static void fetchCrimeExpRanks(List<FactionMember> factionMembers, FactionInfo factionInfo) {
+        if (factionInfo.getApiKey() == null || factionInfo.getApiKey().trim().isEmpty()) {
+            logger.warn("No TornStats API key configured for faction {} - using default crime_exp_rank of 100",
+                    factionInfo.getFactionId());
+            return;
+        }
+
+        try {
+            logger.info("Fetching crime experience ranks from TornStats for faction {}", factionInfo.getFactionId());
+
+            String url = "https://www.tornstats.com/api/v2/" + factionInfo.getApiKey() + "/faction/crimes";
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .addHeader("User-Agent", "TornBot/1.0")
+                    .build();
+
+            try (Response response = tornStatsClient.newCall(request).execute()) {
+                if (response.isSuccessful() && response.body() != null) {
+                    String responseBody = response.body().string();
+                    Map<String, Integer> crimeExpRanks = parseTornStatsCrimeRanks(responseBody);
+
+                    // Match crime exp ranks with faction members
+                    int matchedCount = 0;
+                    for (FactionMember member : factionMembers) {
+                        Integer crimeExpRank = crimeExpRanks.get(member.getUserId());
+                        if (crimeExpRank != null) {
+                            member.setCrimeExpRank(crimeExpRank);
+                            matchedCount++;
+                        } else {
+                            // Keep default value of 100
+                            logger.debug("No crime exp rank found for user {} [{}] - using default 100",
+                                    member.getUsername(), member.getUserId());
+                        }
+                    }
+
+                    logger.info("Matched crime exp ranks for {} of {} faction members",
+                            matchedCount, factionMembers.size());
+
+                } else {
+                    logger.warn("TornStats API request failed for faction {} - HTTP {}: {} - using default ranks",
+                            factionInfo.getFactionId(), response.code(), response.message());
+                }
+            }
+
+            // Rate limiting for TornStats API
+            Thread.sleep(TORNSTATS_API_RATE_LIMIT_MS);
+
+        } catch (Exception e) {
+            logger.error("Error fetching crime exp ranks from TornStats for faction {}: {} - using default ranks",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parse TornStats crime ranks response
+     */
+    private static Map<String, Integer> parseTornStatsCrimeRanks(String responseBody) throws IOException {
+        Map<String, Integer> crimeExpRanks = new HashMap<>();
+
+        try {
+            JsonNode jsonResponse = objectMapper.readTree(responseBody);
+
+            // Check for API error
+            if (jsonResponse.has("status") && !jsonResponse.get("status").asBoolean()) {
+                String message = jsonResponse.has("message") ? jsonResponse.get("message").asText() : "Unknown error";
+                logger.warn("TornStats API error: {}", message);
+                return crimeExpRanks; // Return empty map
+            }
+
+            // Parse members data - assuming the response structure matches the provided document
+            JsonNode membersNode = jsonResponse.get("members");
+            if (membersNode != null && membersNode.isObject()) {
+                Iterator<Map.Entry<String, JsonNode>> fields = membersNode.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> entry = fields.next();
+                    String userId = entry.getKey();
+                    JsonNode memberData = entry.getValue();
+
+                    if (memberData.has("crime_exp_rank")) {
+                        int crimeExpRank = memberData.get("crime_exp_rank").asInt(100); // Default to 100 if invalid
+                        crimeExpRanks.put(userId, crimeExpRank);
+                    }
+                }
+            }
+
+            logger.debug("Parsed {} crime exp ranks from TornStats response", crimeExpRanks.size());
+
+        } catch (Exception e) {
+            logger.error("Error parsing TornStats response: {}", e.getMessage());
+            throw new IOException("Failed to parse TornStats response: " + e.getMessage());
+        }
+
+        return crimeExpRanks;
     }
 
     private static Map<String, GetDiscordMembers.DiscordMember> createDiscordMemberMap(List<GetDiscordMembers.DiscordMember> discordMembers) {
@@ -347,7 +471,7 @@ public class GetFactionMembers {
     }
 
     private static void createTableIfNotExists(Connection connection, String tableName) throws SQLException {
-        // Use parameterized table name safely (already validated)
+        // Updated to include crime_exp_rank column
         String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
                 "user_id VARCHAR(20) PRIMARY KEY, " +
                 "username VARCHAR(100) NOT NULL, " +
@@ -355,6 +479,7 @@ public class GetFactionMembers {
                 "user_in_discord BOOLEAN DEFAULT FALSE, " +
                 "user_discord_id VARCHAR(50), " +
                 "user_discord_mention_id VARCHAR(50), " +
+                "crime_exp_rank INTEGER DEFAULT 100, " + // New column
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
                 "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                 ")";
@@ -381,9 +506,9 @@ public class GetFactionMembers {
             return;
         }
 
-        // Fixed: Column name is faction_id (not userFactionId) and added the missing parameter
-        String sql = "INSERT INTO " + tableName + " (user_id, username, faction_id, user_in_discord, user_discord_id, user_discord_mention_id, updated_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        // Updated SQL to include crime_exp_rank column
+        String sql = "INSERT INTO " + tableName + " (user_id, username, faction_id, user_in_discord, user_discord_id, user_discord_mention_id, crime_exp_rank, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             long factionIdLong;
@@ -401,6 +526,7 @@ public class GetFactionMembers {
                 pstmt.setBoolean(4, member.isUserInDiscord());            // Parameter 4: user_in_discord
                 pstmt.setString(5, member.getUserDiscordId());            // Parameter 5: user_discord_id
                 pstmt.setString(6, member.getUserDiscordMentionId());     // Parameter 6: user_discord_mention_id
+                pstmt.setInt(7, member.getCrimeExpRank());                // Parameter 7: crime_exp_rank
                 pstmt.addBatch();
             }
 

@@ -16,6 +16,13 @@ import java.util.regex.Pattern;
 
 public class GetDiscordMembers {
 
+    /**
+     * └── GetDiscordMembers.java
+     *     ├── Connects to Discord servers using JDA
+     *     ├── Extracts user IDs from Discord nicknames
+     *     └── Maps Torn usernames to Discord mentions
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetDiscordMembers.class);
 
     public static class DiscordMember {

@@ -32,6 +32,15 @@ import java.util.stream.Collectors;
 
 public class GetCompletedData {
 
+    /**
+     * ├── GetCompletedData.java
+     * │   ├── Fetches completed crimes with member performance data
+     * │   ├── Processes rewards (money, items, respect)
+     * │   ├── Handles Xanax and other item withdrawal notifications
+     * │   ├── Triggers payment notifications for non-reusable items
+     * │   └── Uses incremental updates with timestamp filtering
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetCompletedData.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

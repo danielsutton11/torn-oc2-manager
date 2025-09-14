@@ -31,6 +31,14 @@ import java.util.stream.Collectors;
 
 public class GetAvailableCrimes {
 
+    /**
+     * ├── GetAvailableCrimes.java
+     * │   ├── Fetches currently available crimes for each faction
+     * │   ├── Processes crime slots and item requirements
+     * │   ├── Stores in faction-specific available crimes tables
+     * │   └── Triggers notifications when more crimes needed
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetAvailableCrimes.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

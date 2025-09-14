@@ -14,9 +14,57 @@ import com.Torn.Discord.Messages.DiscordMessages;
 /**
  * Algorithmic optimizer for assigning available members to available crime slots
  * based on CPR, crime value, and slot priority
- *
- * Enhanced with comprehensive debugging to identify faction processing issues
+
+ For Each Faction:
+ ├── Load Available Members (from OC_DATA)
+ │   ├── Get members not currently in crimes
+ │   ├── Load their CPR data for all crime-role combinations
+ │   └── Get crime experience ranking (1-100) from CONFIG database
+ ├── Load Available Crime Slots (from OC_DATA)
+ │   ├── Get empty slots across all active crimes
+ │   ├── Calculate expected value for each crime
+ │   └── Determine slot priority (Robber > Hacker > Driver, etc.)
+ └── Load Discord Mappings (from CONFIG)
+ └── Match member IDs to Discord usernames for notifications
+
+ For each available slot:
+ ├── Find members with CPR >= 60 for that specific crime-role
+ ├── Score each member-slot combination based on:
+ │   ├── 50% - Slot Priority (how critical the role is)
+ │   ├── 30% - Member's CPR for that specific role
+ │   ├── 20% - Crime's expected value
+ │   └── Small bonuses for recent activity
+ └── Assign highest-scoring combinations first
+
+ For remaining unfilled slots:
+ ├── Use members who didn't qualify for Pass 1 (CPR < 60)
+ ├── Score based on:
+ │   ├── 50% - Slot Priority
+ │   ├── 30% - Crime Experience Ranking (1 = best, 100 = worst)
+ │   ├── 10% - Crime Value
+ │   └── 10% - Activity Bonus
+ └── Assign the best available matches
+
+ IF (members with CPR >= 60 available):
+ └── Use high-quality CPR-based assignments
+
+ IF (no members meet CPR threshold):
+ └── Fall back to crime experience ranking
+ └── Still fill slots with the best available members
+
+ IF (some slots filled in Pass 1, some need Pass 2):
+ └── Hybrid approach - quality where possible, coverage everywhere else
+
+ For Each Assignment:
+ ├── Generate human-readable reasoning:
+ │   ├── CPR-based: "High CPR (85%), Critical priority slot"
+ │   └── Fallback: "Fallback assignment (CPR < 60), Good crime experience (rank 15)"
+ ├── Group by crime for organized display
+ ├── Add strategic recommendations
+ └── Send formatted message with member mentions
+
  */
+
 public class CrimeAssignmentOptimizer {
 
     private static final Logger logger = LoggerFactory.getLogger(CrimeAssignmentOptimizer.class);
@@ -49,19 +97,22 @@ public class CrimeAssignmentOptimizer {
         private final String username;
         private final Map<String, Integer> crimeSlotCPR;
         private final Timestamp lastJoinedCrimeDate;
+        private final int crimeExpRank; // Added crime experience rank (1 = best, 100 = worst)
 
         public AvailableMember(String userId, String username, Map<String, Integer> crimeSlotCPR,
-                               Timestamp lastJoinedCrimeDate) {
+                               Timestamp lastJoinedCrimeDate, int crimeExpRank) {
             this.userId = userId;
             this.username = username;
             this.crimeSlotCPR = crimeSlotCPR != null ? crimeSlotCPR : new HashMap<>();
             this.lastJoinedCrimeDate = lastJoinedCrimeDate;
+            this.crimeExpRank = crimeExpRank;
         }
 
         public String getUserId() { return userId; }
         public String getUsername() { return username; }
         public Map<String, Integer> getCrimeSlotCPR() { return crimeSlotCPR; }
         public Timestamp getLastJoinedCrimeDate() { return lastJoinedCrimeDate; }
+        public int getCrimeExpRank() { return crimeExpRank; }
 
         public Integer getCPRForSlot(String crimeName, String slotName) {
             String key = crimeName + "|" + slotName;
@@ -70,8 +121,8 @@ public class CrimeAssignmentOptimizer {
 
         @Override
         public String toString() {
-            return String.format("AvailableMember{userId='%s', username='%s', cprEntries=%d}",
-                    userId, username, crimeSlotCPR.size());
+            return String.format("AvailableMember{userId='%s', username='%s', cprEntries=%d, crimeExpRank=%d}",
+                    userId, username, crimeSlotCPR.size(), crimeExpRank);
         }
     }
 
@@ -296,7 +347,7 @@ public class CrimeAssignmentOptimizer {
         logger.info("--- Starting detailed optimization for faction {} ---", factionInfo.getFactionId());
 
         try {
-            // Step 1: Load available members with their CPR data
+            // Step 1: Load available members with their CPR data and crime exp rank
             logger.info("STEP 1: Loading available members for faction {}", factionInfo.getFactionId());
             List<AvailableMember> availableMembers = loadAvailableMembers(configConnection, ocDataConnection, factionInfo);
             logger.info("STEP 1 RESULT: Found {} available members for faction {}",
@@ -401,6 +452,7 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Calculate optimization score for a member-slot combination (urgency removed)
+     * Now includes crime exp ranking as fallback when CPR is low
      */
     private static double calculateMemberSlotScore(AvailableMember member, AvailableCrimeSlot slot) {
         // Factor 1: Member's CPR for this crime-slot (0-100, normalized to 0-1)
@@ -416,11 +468,15 @@ public class CrimeAssignmentOptimizer {
         // Factor 4: Member activity bonus (recent activity = higher priority)
         double activityScore = calculateActivityScore(member);
 
+        // Factor 5: Crime experience ranking (1 = best, 100 = worst, normalized to 0-1)
+        double crimeExpScore = (101 - member.getCrimeExpRank()) / 100.0; // Convert to 0-1 where 1 is best
+
         // Weighted combination (urgency factor removed, weights redistributed)
         double totalScore = (cprScore * CPR_WEIGHT) +
                 (valueScore * CRIME_VALUE_WEIGHT) +
                 (priorityScore * SLOT_PRIORITY_WEIGHT) +
-                (activityScore * 0.1); // Small bonus for active members
+                (activityScore * 0.05) + // Small bonus for active members
+                (crimeExpScore * 0.05); // Small bonus for good crime exp rank
 
         return Math.max(0.0, Math.min(1.0, totalScore)); // Clamp to [0, 1]
     }
@@ -443,8 +499,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Hungarian algorithm variant for optimal assignment with CPR threshold
-     * Now includes minimum CPR requirement of 60 for role assignments
+     * Hungarian algorithm variant for optimal assignment with CPR threshold and crime exp fallback
+     * Now includes two-pass approach: first pass with CPR >= 60, second pass with crime exp ranking fallback
      */
     private static List<MemberSlotAssignment> hungarianAssignment(List<AvailableMember> members,
                                                                   List<AvailableCrimeSlot> slots,
@@ -456,41 +512,102 @@ public class CrimeAssignmentOptimizer {
         // Minimum CPR threshold for role assignment
         final int MIN_CPR_THRESHOLD = 60;
 
+        logger.info("Starting assignment process: {} members, {} slots", members.size(), slots.size());
+
+        // PASS 1: CPR-based assignments (CPR >= 60)
+        logger.info("PASS 1: Assigning members with CPR >= {}", MIN_CPR_THRESHOLD);
+        int pass1Assignments = performAssignmentPass(members, slots, scoreMatrix, memberUsed, slotUsed,
+                assignments, MIN_CPR_THRESHOLD, true);
+        logger.info("PASS 1 COMPLETE: {} assignments made with CPR >= {}", pass1Assignments, MIN_CPR_THRESHOLD);
+
+        // PASS 2: Crime experience ranking fallback for remaining slots
+        int remainingSlots = countRemainingSlots(slotUsed);
+        int remainingMembers = countRemainingMembers(memberUsed);
+
+        if (remainingSlots > 0 && remainingMembers > 0) {
+            logger.info("PASS 2: Using crime experience ranking fallback for {} remaining slots with {} remaining members",
+                    remainingSlots, remainingMembers);
+            int pass2Assignments = performAssignmentPass(members, slots, scoreMatrix, memberUsed, slotUsed,
+                    assignments, MIN_CPR_THRESHOLD, false);
+            logger.info("PASS 2 COMPLETE: {} additional assignments made using crime experience ranking", pass2Assignments);
+        } else {
+            logger.info("PASS 2 SKIPPED: No remaining slots ({}) or members ({})", remainingSlots, remainingMembers);
+        }
+
+        // Log final summary
+        int totalSlots = slots.size();
+        int assignedSlots = assignments.size();
+        int unassignedSlots = totalSlots - assignedSlots;
+
+        logger.info("ASSIGNMENT SUMMARY:");
+        logger.info("  Total slots: {}", totalSlots);
+        logger.info("  Assigned slots: {} ({:.1f}%)", assignedSlots, (assignedSlots * 100.0 / totalSlots));
+        logger.info("  Pass 1 (CPR >= {}): {}", MIN_CPR_THRESHOLD, pass1Assignments);
+        logger.info("  Pass 2 (Exp Rank): {}", assignedSlots - pass1Assignments);
+        logger.info("  Unassigned slots: {}", unassignedSlots);
+
+        return assignments;
+    }
+
+    /**
+     * Perform a single assignment pass (either CPR-based or experience ranking-based)
+     */
+    private static int performAssignmentPass(List<AvailableMember> members,
+                                             List<AvailableCrimeSlot> slots,
+                                             double[][] scoreMatrix,
+                                             boolean[] memberUsed,
+                                             boolean[] slotUsed,
+                                             List<MemberSlotAssignment> assignments,
+                                             int minCprThreshold,
+                                             boolean useCprFilter) {
+        int assignmentsMade = 0;
+
         // Greedy approach: repeatedly find the highest scoring available combination
         while (true) {
             int bestMember = -1;
             int bestSlot = -1;
             double bestScore = -1.0;
 
-            // Find the best available member-slot combination
+            // Find the best available member-slot combination for this pass
             for (int m = 0; m < members.size(); m++) {
                 if (memberUsed[m]) continue;
 
                 for (int s = 0; s < slots.size(); s++) {
                     if (slotUsed[s]) continue;
 
-                    // Check CPR threshold before considering this assignment
                     AvailableMember member = members.get(m);
                     AvailableCrimeSlot slot = slots.get(s);
                     Integer memberCPR = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
 
-                    // Skip this assignment if CPR is below threshold
-                    if (memberCPR == null || memberCPR < MIN_CPR_THRESHOLD) {
-                        logger.debug("Skipping assignment: {} to {} ({}) - CPR {} below threshold {}",
-                                member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
-                                memberCPR != null ? memberCPR : "unknown", MIN_CPR_THRESHOLD);
-                        continue;
-                    }
-
-                    if (scoreMatrix[m][s] > bestScore) {
-                        bestScore = scoreMatrix[m][s];
-                        bestMember = m;
-                        bestSlot = s;
+                    // Apply filtering based on pass type
+                    if (useCprFilter) {
+                        // Pass 1: Skip if CPR is below threshold
+                        if (memberCPR == null || memberCPR < minCprThreshold) {
+                            continue;
+                        }
+                        // Use normal scoring for pass 1
+                        if (scoreMatrix[m][s] > bestScore) {
+                            bestScore = scoreMatrix[m][s];
+                            bestMember = m;
+                            bestSlot = s;
+                        }
+                    } else {
+                        // Pass 2: Skip if CPR is above threshold (already handled in pass 1)
+                        if (memberCPR != null && memberCPR >= minCprThreshold) {
+                            continue;
+                        }
+                        // For pass 2, we use crime exp ranking, so we need a different scoring approach
+                        double expRankScore = calculateCrimeExpScore(member, slot);
+                        if (expRankScore > bestScore) {
+                            bestScore = expRankScore;
+                            bestMember = m;
+                            bestSlot = s;
+                        }
                     }
                 }
             }
 
-            // No more good assignments found
+            // No more good assignments found for this pass
             if (bestMember == -1 || bestScore < 0.1) { // Minimum threshold
                 break;
             }
@@ -498,61 +615,117 @@ public class CrimeAssignmentOptimizer {
             // Make the assignment
             AvailableMember member = members.get(bestMember);
             AvailableCrimeSlot slot = slots.get(bestSlot);
+            Integer memberCPR = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
 
-            String reasoning = generateAssignmentReasoning(member, slot, bestScore);
+            String reasoning = generateAssignmentReasoning(member, slot, bestScore, useCprFilter);
             assignments.add(new MemberSlotAssignment(member, slot, bestScore, reasoning));
 
-            logger.debug("Assigned: {} to {} ({}) with CPR {}",
-                    member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
-                    member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition()));
+            String assignmentType = useCprFilter ? "CPR-based" : "Exp Rank fallback";
+            logger.debug("Assigned ({}): {} to {} ({}) - CPR: {}, ExpRank: {}",
+                    assignmentType, member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                    memberCPR != null ? memberCPR : "N/A", member.getCrimeExpRank());
 
             memberUsed[bestMember] = true;
             slotUsed[bestSlot] = true;
+            assignmentsMade++;
         }
 
-        // Log summary of CPR-based filtering
-        int totalSlots = slots.size();
-        int assignedSlots = assignments.size();
-        int unassignedSlots = totalSlots - assignedSlots;
-
-        if (unassignedSlots > 0) {
-            logger.info("CPR filtering results: {} slots assigned, {} slots unassigned due to CPR < {} threshold",
-                    assignedSlots, unassignedSlots, MIN_CPR_THRESHOLD);
-        }
-
-        return assignments;
+        return assignmentsMade;
     }
 
     /**
-     * Generate human-readable reasoning for an assignment (priority-focused)
+     * Calculate crime experience score for fallback assignments
      */
-    private static String generateAssignmentReasoning(AvailableMember member, AvailableCrimeSlot slot, double score) {
+    private static double calculateCrimeExpScore(AvailableMember member, AvailableCrimeSlot slot) {
+        // Base score from crime experience ranking (1 = best, 100 = worst)
+        double expRankScore = (101 - member.getCrimeExpRank()) / 100.0; // Convert to 0-1 where 1 is best
+
+        // Factor in slot priority
+        double priorityScore = Math.min(slot.getSlotPriority(), 2.0) / 2.0;
+
+        // Factor in crime value
+        double valueScore = Math.min(slot.getExpectedValue() / 50_000_000.0, 1.0);
+
+        // Activity bonus
+        double activityScore = calculateActivityScore(member);
+
+        // Weighted combination for fallback scoring
+        return (expRankScore * 0.3) + (priorityScore * 0.5) + (valueScore * 0.1) + (activityScore * 0.1);
+    }
+
+    /**
+     * Count remaining unused slots
+     */
+    private static int countRemainingSlots(boolean[] slotUsed) {
+        int count = 0;
+        for (boolean used : slotUsed) {
+            if (!used) count++;
+        }
+        return count;
+    }
+
+    /**
+     * Count remaining unused members
+     */
+    private static int countRemainingMembers(boolean[] memberUsed) {
+        int count = 0;
+        for (boolean used : memberUsed) {
+            if (!used) count++;
+        }
+        return count;
+    }
+
+    /**
+     * Generate human-readable reasoning for an assignment (updated for two-pass system)
+     */
+    private static String generateAssignmentReasoning(AvailableMember member, AvailableCrimeSlot slot,
+                                                      double score, boolean isCprBased) {
         List<String> reasons = new ArrayList<>();
 
         Integer cpr = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
+        int expRank = member.getCrimeExpRank();
 
-        // Emphasize slot priority first (since it's now 50% of the algorithm)
-        if (slot.getSlotPriority() > 2.0) {
-            reasons.add("Critical priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
-        } else if (slot.getSlotPriority() > 1.5) {
-            reasons.add("High priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
-        }
+        if (isCprBased) {
+            // Pass 1 reasoning (CPR-based)
+            if (slot.getSlotPriority() > 2.0) {
+                reasons.add("Critical priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
+            } else if (slot.getSlotPriority() > 1.5) {
+                reasons.add("High priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
+            }
 
-        if (cpr != null && cpr > 80) {
-            reasons.add("High CPR (" + cpr + "%)");
-        } else if (cpr != null && cpr > 60) {
-            reasons.add("Good CPR (" + cpr + "%)");
-        }
+            if (cpr != null && cpr > 80) {
+                reasons.add("High CPR (" + cpr + "%)");
+            } else if (cpr != null && cpr > 60) {
+                reasons.add("Good CPR (" + cpr + "%)");
+            }
 
-        if (slot.getExpectedValue() > 20_000_000) {
-            reasons.add("High value crime ($" + String.format("%.1fM", slot.getExpectedValue() / 1_000_000.0) + ")");
+            if (slot.getExpectedValue() > 20_000_000) {
+                reasons.add("High value crime ($" + String.format("%.1fM", slot.getExpectedValue() / 1_000_000.0) + ")");
+            }
+        } else {
+            // Pass 2 reasoning (Experience ranking fallback)
+            reasons.add("Fallback assignment (CPR < 60)");
+
+            if (expRank <= 10) {
+                reasons.add("Excellent crime experience (rank " + expRank + ")");
+            } else if (expRank <= 30) {
+                reasons.add("Good crime experience (rank " + expRank + ")");
+            } else if (expRank <= 50) {
+                reasons.add("Moderate crime experience (rank " + expRank + ")");
+            } else {
+                reasons.add("Basic crime experience (rank " + expRank + ")");
+            }
+
+            if (slot.getSlotPriority() > 1.5) {
+                reasons.add("Priority slot needs filling");
+            }
         }
 
         return reasons.isEmpty() ? "Best available match" : String.join(", ", reasons);
     }
 
     /**
-     * Load available members with their CPR data
+     * Load available members with their CPR data and crime experience ranking
      * Enhanced with comprehensive debugging and error handling
      */
     private static List<AvailableMember> loadAvailableMembers(Connection configConnection,
@@ -561,9 +734,11 @@ public class CrimeAssignmentOptimizer {
         List<AvailableMember> members = new ArrayList<>();
         String availableMembersTable = Constants.TABLE_NAME_AVAILABLE_MEMBERS + factionInfo.getDbSuffix();
         String cprTable = Constants.TABLE_NAME_CPR + factionInfo.getDbSuffix();
+        String membersTable = "members_" + factionInfo.getDbSuffix(); // From CONFIG database
 
         logger.info("DEBUG: Attempting to load members from OC_DATA table: {}", availableMembersTable);
         logger.info("DEBUG: Will also load CPR data from table: {}", cprTable);
+        logger.info("DEBUG: Will load crime exp rank from CONFIG table: {}", membersTable);
 
         // Check if tables exist first
         try {
@@ -575,7 +750,16 @@ public class CrimeAssignmentOptimizer {
             throw new SQLException("Available members table missing for faction " + factionInfo.getFactionId(), e);
         }
 
-        // First get available members
+        try {
+            verifyTableExists(configConnection, membersTable, "members");
+            logger.info("✓ Table {} exists in CONFIG database", membersTable);
+        } catch (SQLException e) {
+            logger.error("✗ CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
+                    membersTable, factionInfo.getFactionId(), e.getMessage());
+            throw new SQLException("Members table missing in CONFIG database for faction " + factionInfo.getFactionId(), e);
+        }
+
+        // First get available members from OC_DATA
         String membersSql = "SELECT user_id, username, last_joined_crime_date FROM " + availableMembersTable +
                 " WHERE is_in_oc = false ORDER BY username";
 
@@ -597,7 +781,11 @@ public class CrimeAssignmentOptimizer {
                 Map<String, Integer> cprData = loadMemberCPRData(ocDataConnection, cprTable, userId);
                 logger.debug("  Loaded {} CPR entries for member {}", cprData.size(), username);
 
-                members.add(new AvailableMember(userId, username, cprData, lastJoinedCrimeDate));
+                // Load crime experience rank from CONFIG database
+                int crimeExpRank = loadMemberCrimeExpRank(configConnection, membersTable, userId);
+                logger.debug("  Crime experience rank for member {}: {}", username, crimeExpRank);
+
+                members.add(new AvailableMember(userId, username, cprData, lastJoinedCrimeDate, crimeExpRank));
             }
 
             logger.info("✓ Successfully loaded {} members from table {} for faction {}",
@@ -615,6 +803,29 @@ public class CrimeAssignmentOptimizer {
         }
 
         return members;
+    }
+
+    /**
+     * Load crime experience rank for a specific member from CONFIG database
+     */
+    private static int loadMemberCrimeExpRank(Connection configConnection, String membersTable, String userId) {
+        String sql = "SELECT crime_exp_rank FROM " + membersTable + " WHERE user_id = ?";
+
+        try (PreparedStatement stmt = configConnection.prepareStatement(sql)) {
+            stmt.setString(1, userId);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    Integer rank = rs.getObject("crime_exp_rank", Integer.class);
+                    return rank != null ? rank : 100; // Default to 100 if null
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("Could not load crime exp rank for user {} from table {}: {}",
+                    userId, membersTable, e.getMessage());
+        }
+
+        return 100; // Default rank if not found or error
     }
 
     /**
@@ -678,19 +889,6 @@ public class CrimeAssignmentOptimizer {
         }
 
         return columnName; // Fallback
-    }
-
-    /**
-     * Expand crime abbreviation to full name
-     */
-    private static String createCrimeAbbreviation(String crimeName) {
-        if (crimeName == null || crimeName.trim().isEmpty()) {
-            return "UNK";
-        }
-        return Arrays.stream(crimeName.split("\\s+"))
-                .filter(word -> !word.isEmpty())
-                .map(word -> word.substring(0, 1).toUpperCase())
-                .collect(Collectors.joining(""));
     }
 
     /**
@@ -938,8 +1136,6 @@ public class CrimeAssignmentOptimizer {
 
         return Math.min(basePriority, 5.0); // Increased cap to accommodate database values
     }
-
-
 
     /**
      * Get faction information from the config database
@@ -1251,7 +1447,6 @@ public class CrimeAssignmentOptimizer {
             int processedCount = 0;
             int successfulNotifications = 0;
             int failedNotifications = 0;
-            int skippedNotifications = 0;
 
             for (FactionInfo factionInfo : factions) {
                 logger.info("==================== DISCORD NOTIFICATION {}/{} ====================",
@@ -1289,7 +1484,6 @@ public class CrimeAssignmentOptimizer {
             logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
             logger.info("  Successful notifications: {}", successfulNotifications);
             logger.info("  Failed notifications: {}", failedNotifications);
-            logger.info("  Skipped notifications: {}", skippedNotifications);
             logger.info("  Success rate: {:.1f}%", processedCount > 0 ? (successfulNotifications * 100.0 / processedCount) : 0.0);
 
         } catch (SQLException e) {
@@ -1584,6 +1778,5 @@ public class CrimeAssignmentOptimizer {
             }
         }
     }
-
-
 }
+

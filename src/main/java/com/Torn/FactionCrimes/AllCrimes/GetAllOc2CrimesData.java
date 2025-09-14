@@ -18,6 +18,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class GetAllOc2CrimesData {
 
+    /**
+     * ├── GetAllOc2CrimesData.java
+     * │   ├── Fetches all organized crime definitions from Torn API
+     * │   ├── Calculates item costs and expected rewards
+     * │   ├── Stores crime templates with slot information
+     * │   └── Tracks which items should be transferred vs bought
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetAllOc2CrimesData.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
 

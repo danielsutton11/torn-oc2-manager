@@ -24,6 +24,13 @@ import java.util.*;
 
 public class GetPaidCrimesData {
 
+    /**
+     * ├── GetPaidCrimesData.java
+     * │   ├── Fetches payout data for completed crimes
+     * │   ├── Updates member payout percentages and amounts
+     * │   └── Calculates faction vs member splits
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetPaidCrimesData.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

@@ -13,6 +13,14 @@ import java.sql.Connection;
 @RequestMapping("/payment")
 public class PaymentController {
 
+    /**
+     * ├── PaymentController.java
+     * │   ├── Web endpoints for payment claim links
+     * │   ├── Auto-redirect to Torn payment page
+     * │   ├── Manual payment instruction pages
+     * │   └── Request status tracking
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(PaymentController.class);
 
     /**

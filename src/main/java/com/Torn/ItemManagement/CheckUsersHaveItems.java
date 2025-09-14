@@ -14,6 +14,13 @@ import java.util.*;
 
 public class CheckUsersHaveItems {
 
+    /**
+     * ├── CheckUsersHaveItems.java
+     * │   ├── Identifies members needing items they don't have
+     * │   ├── Sends Discord notifications to faction armourers
+     * │   └── Logs faction purchase requirements
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(CheckUsersHaveItems.class);
 
     public static class FactionInfo {

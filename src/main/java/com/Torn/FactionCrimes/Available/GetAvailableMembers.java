@@ -16,6 +16,13 @@ import java.util.*;
 
 public class GetAvailableMembers {
 
+    /**
+     * ├── GetAvailableMembers.java
+     * │   ├── Fetches members not currently in crimes
+     * │   ├── Enriches with last crime participation dates
+     * │   └── Stores in faction-specific available members tables
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetAvailableMembers.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

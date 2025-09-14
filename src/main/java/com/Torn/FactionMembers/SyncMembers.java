@@ -11,6 +11,11 @@ import java.sql.SQLException;
 
 public class SyncMembers {
 
+    /**
+     ├── SyncMembers.java
+     │   └── Orchestrates the member synchronization between Torn and Discord
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(SyncMembers.class);
 
     public static void syncFactionMembers() throws SQLException, IOException {

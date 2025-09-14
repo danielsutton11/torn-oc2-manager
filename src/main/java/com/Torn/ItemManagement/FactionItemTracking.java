@@ -13,6 +13,14 @@ import java.util.List;
  */
 public class FactionItemTracking {
 
+    /**
+     * └── FactionItemTracking.java
+     *     ├── Tracks all faction item purchases and member payments
+     *     ├── Logs when faction needs to buy items
+     *     ├── Tracks payment request status (pending/fulfilled)
+     *     └── Provides spending summaries and audit trails
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(FactionItemTracking.class);
 
     public enum ItemActionType {

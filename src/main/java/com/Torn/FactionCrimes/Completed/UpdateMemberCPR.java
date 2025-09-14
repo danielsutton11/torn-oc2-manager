@@ -15,6 +15,14 @@ import java.util.stream.Collectors;
 
 public class UpdateMemberCPR {
 
+    /**
+     * └── UpdateMemberCPR.java
+     *     ├── Calculates Crime Pass Rate (CPR) for each member-role combination
+     *     ├── Groups roles by base type (e.g., "Muscle #1", "Muscle #2" → "Muscle")
+     *     ├── Shares CPR across role variants within same crime
+     *     └── Creates faction-specific CPR tables with dynamic columns
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(UpdateMemberCPR.class);
 
     public static class FactionInfo {

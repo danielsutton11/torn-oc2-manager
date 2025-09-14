@@ -30,12 +30,18 @@ import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 import static com.Torn.ItemManagement.CheckUsersHaveItems.checkUsersHaveItems;
 import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
-//TODO:
-// Work out who should join what crimes, create discord message for users to tell them which crime to join
-
 @SpringBootApplication
 @EnableWebMvc
 public class Execute {
+
+    /**
+     * ├── Execute.java
+     * │   ├── Main application entry point
+     * │   ├── Handles both batch jobs and web service modes
+     * │   ├── Orchestrates all setup and processing jobs
+     * │   └── Manages graceful shutdown and cleanup
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
     public static final Postgres postgres = new Postgres();
 

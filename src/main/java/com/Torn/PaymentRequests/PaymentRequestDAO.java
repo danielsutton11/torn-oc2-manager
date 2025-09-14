@@ -16,6 +16,14 @@ import java.util.UUID;
  */
 public class PaymentRequestDAO {
 
+    /**
+     * ├── PaymentRequestDAO.java
+     * │   ├── Database operations for payment requests
+     * │   ├── Handles claim/fulfill workflow
+     * │   ├── Manages request expiration and reset
+     * │   └── Provides system statistics
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(PaymentRequestDAO.class);
 
     /**

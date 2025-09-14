@@ -21,6 +21,14 @@ import java.util.stream.Collectors;
 
 public class DiscordMessages {
 
+    /**
+     * └── DiscordMessages.java
+     *     ├── High-level business logic for Discord notifications
+     *     ├── Payment requests, item needs, crime completions
+     *     ├── Xanax withdrawal alerts, crime assignments
+     *     └── Strategic recommendations and member mentions
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(DiscordMessages.class);
 
 

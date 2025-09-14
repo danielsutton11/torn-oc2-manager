@@ -28,6 +28,16 @@ import java.util.stream.Collectors;
 
 public class UpdateOverviewData {
 
+    /**
+     * ├── UpdateOverviewData.java
+     * │   ├── Creates comprehensive member status view
+     * │   ├── Shows who's in crimes, what items they need/have
+     * │   ├── Detects when members join crimes with items they own
+     * │   ├── Triggers payment requests for non-reusable items
+     * │   └── Maintains real-time faction overview tables
+     */
+
+
     private static final Logger logger = LoggerFactory.getLogger(UpdateOverviewData.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

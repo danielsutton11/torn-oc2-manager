@@ -25,6 +25,14 @@ import java.util.stream.Collectors;
  */
 public class PaymentVerificationService {
 
+    /**
+     * └── PaymentVerificationService.java
+     *     ├── Monitors faction news for completed payments
+     *     ├── Auto-fulfills payment requests when payments detected
+     *     ├── Resets expired claims back to pending
+     *     └── Sends fulfillment notifications
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(PaymentVerificationService.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;

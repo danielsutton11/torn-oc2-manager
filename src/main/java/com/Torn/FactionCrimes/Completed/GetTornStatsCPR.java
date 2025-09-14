@@ -15,6 +15,14 @@ import java.util.*;
 
 public class GetTornStatsCPR {
 
+    /**
+     * └── GetTornStatsCPR.java
+     *     ├── Fetches CPR data from TornStats API for cross-validation
+     *     ├── Updates local CPR tables with higher TornStats values
+     *     ├── Tries multiple API keys per faction for redundancy
+     *     └── Maps TornStats data to local crime-slot combinations
+     */
+
     private static final Logger logger = LoggerFactory.getLogger(GetTornStatsCPR.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_STATS_API_RATE_LIMIT_MS = 2000;
