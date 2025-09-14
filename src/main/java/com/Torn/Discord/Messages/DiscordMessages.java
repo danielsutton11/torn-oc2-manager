@@ -351,7 +351,7 @@ public class DiscordMessages {
                 .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName()));
 
         StringBuilder description = new StringBuilder();
-        description.append("The following users should join the following crimes, in the specified slots:*\n\n");
+        description.append("The following users should join the following crimes, in the specified slots:\n\n");
 
         Set<String> mentionedUsers = new HashSet<>();
         Set<String> usersNotInDiscord = new HashSet<>();

@@ -14,6 +14,8 @@ import com.Torn.Discord.Messages.DiscordMessages;
 /**
  * Algorithmic optimizer for assigning available members to available crime slots
  * based on CPR, crime value, and slot priority
+ *
+ * Enhanced with comprehensive debugging to identify faction processing issues
  */
 public class CrimeAssignmentOptimizer {
 
@@ -35,6 +37,11 @@ public class CrimeAssignmentOptimizer {
 
         public String getFactionId() { return factionId; }
         public String getDbSuffix() { return dbSuffix; }
+
+        @Override
+        public String toString() {
+            return String.format("FactionInfo{factionId='%s', dbSuffix='%s'}", factionId, dbSuffix);
+        }
     }
 
     public static class AvailableMember {
@@ -59,6 +66,12 @@ public class CrimeAssignmentOptimizer {
         public Integer getCPRForSlot(String crimeName, String slotName) {
             String key = crimeName + "|" + slotName;
             return crimeSlotCPR.getOrDefault(key, 0);
+        }
+
+        @Override
+        public String toString() {
+            return String.format("AvailableMember{userId='%s', username='%s', cprEntries=%d}",
+                    userId, username, crimeSlotCPR.size());
         }
     }
 
@@ -95,6 +108,12 @@ public class CrimeAssignmentOptimizer {
 
         public String getSlotKey() {
             return crimeId + "|" + slotPositionId;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("AvailableCrimeSlot{crimeId=%d, crimeName='%s', slotPosition='%s', expectedValue=%d}",
+                    crimeId, crimeName, slotPosition, expectedValue);
         }
     }
 
@@ -153,109 +172,182 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Main entry point for optimizing crime assignments for all factions
+     * Enhanced with comprehensive debugging
      */
     public static void optimizeAllFactionsCrimeAssignments() throws SQLException {
+        logger.info("==================== STARTING CRIME ASSIGNMENT OPTIMIZATION ====================");
         logger.info("Starting crime assignment optimization for all factions (urgency-free algorithm)");
 
         String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
 
         if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            logger.error("CRITICAL: DATABASE_URL_CONFIG environment variable not set");
             throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
         }
 
         if (ocDataDatabaseUrl == null || ocDataDatabaseUrl.isEmpty()) {
+            logger.error("CRITICAL: DATABASE_URL_OC_DATA environment variable not set");
             throw new IllegalStateException("DATABASE_URL_OC_DATA environment variable not set");
         }
+
+        logger.info("Database URLs loaded - CONFIG: {}, OC_DATA: {}",
+                maskDatabaseUrl(configDatabaseUrl), maskDatabaseUrl(ocDataDatabaseUrl));
 
         try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
              Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
 
-            logger.info("Database connections established successfully");
+            logger.info("✓ Database connections established successfully");
 
+            logger.info("Loading faction information...");
             List<FactionInfo> factions = getFactionInfo(configConnection);
+
             if (factions.isEmpty()) {
-                logger.warn("No OC2-enabled factions found for optimization");
+                logger.warn("WARNING: No OC2-enabled factions found for optimization");
                 return;
             }
 
-            logger.info("Found {} OC2-enabled factions to optimize", factions.size());
+            logger.info("✓ Found {} OC2-enabled factions to optimize", factions.size());
+            for (int i = 0; i < factions.size(); i++) {
+                FactionInfo faction = factions.get(i);
+                logger.info("  {}. Faction ID: {}, DB Suffix: {}", i + 1, faction.getFactionId(), faction.getDbSuffix());
+            }
 
             int processedCount = 0;
             int successfulCount = 0;
             int failedCount = 0;
 
             for (FactionInfo factionInfo : factions) {
+                logger.info("==================== PROCESSING FACTION {}/{} ====================",
+                        processedCount + 1, factions.size());
+                logger.info("Faction: {}", factionInfo);
+
                 try {
-                    logger.info("Optimizing crime assignments for faction: {} ({}/{})",
+                    logger.info("Starting optimization for faction: {} (Progress: {}/{})",
                             factionInfo.getFactionId(), processedCount + 1, factions.size());
 
                     OptimizationResult result = optimizeFactionCrimeAssignments(
                             configConnection, ocDataConnection, factionInfo);
 
                     if (result != null) {
-                        logger.info("Optimization completed for faction {} - {} assignments (score: {:.3f})",
+                        logger.info("✓ Optimization completed for faction {} - {} assignments (score: {:.3f})",
                                 factionInfo.getFactionId(), result.getAssignments().size(), result.getTotalScore());
 
-                        // Log top assignments
-                        result.getAssignments().stream()
-                                .limit(5) // Show top 5 assignments
-                                .forEach(assignment -> logger.info("  → {}", assignment));
+                        // Log detailed results
+                        logger.info("  Result summary: {}", result);
 
-                        if (result.getAssignments().size() > 5) {
-                            logger.info("  → ... and {} more assignments", result.getAssignments().size() - 5);
+                        // Log top assignments
+                        if (!result.getAssignments().isEmpty()) {
+                            logger.info("  Top assignments for faction {}:", factionInfo.getFactionId());
+                            result.getAssignments().stream()
+                                    .limit(5) // Show top 5 assignments
+                                    .forEach(assignment -> logger.info("    → {}", assignment));
+
+                            if (result.getAssignments().size() > 5) {
+                                logger.info("    → ... and {} more assignments", result.getAssignments().size() - 5);
+                            }
+                        } else {
+                            logger.info("  No assignments generated for faction {}", factionInfo.getFactionId());
                         }
 
                         successfulCount++;
                     } else {
-                        logger.warn("No optimization result for faction {}", factionInfo.getFactionId());
+                        logger.warn("✗ No optimization result returned for faction {}", factionInfo.getFactionId());
                         failedCount++;
                     }
 
                     processedCount++;
 
                 } catch (Exception e) {
-                    logger.error("Error optimizing faction {}: {}", factionInfo.getFactionId(), e.getMessage(), e);
+                    logger.error("✗ EXCEPTION: Error optimizing faction {}: {}",
+                            factionInfo.getFactionId(), e.getMessage(), e);
                     failedCount++;
+                    processedCount++; // Still count as processed
                 }
+
+                logger.info("==================== COMPLETED FACTION {} ====================",
+                        factionInfo.getFactionId());
             }
 
             // Final summary
+            logger.info("==================== OPTIMIZATION SUMMARY ====================");
             logger.info("Crime assignment optimization completed:");
             logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
             logger.info("  Successful: {}", successfulCount);
             logger.info("  Failed: {}", failedCount);
+            logger.info("  Success rate: {:.1f}%", processedCount > 0 ? (successfulCount * 100.0 / processedCount) : 0.0);
 
         } catch (SQLException e) {
-            logger.error("Database error during crime assignment optimization", e);
+            logger.error("CRITICAL: Database error during crime assignment optimization", e);
             throw e;
         }
+
+        logger.info("==================== OPTIMIZATION PROCESS COMPLETE ====================");
     }
 
     /**
      * Optimize crime assignments for a single faction using advanced algorithms
+     * Enhanced with comprehensive debugging
      */
     private static OptimizationResult optimizeFactionCrimeAssignments(Connection configConnection,
                                                                       Connection ocDataConnection,
                                                                       FactionInfo factionInfo) throws SQLException {
 
-        // Load available members with their CPR data
-        List<AvailableMember> availableMembers = loadAvailableMembers(configConnection, ocDataConnection, factionInfo);
+        logger.info("--- Starting detailed optimization for faction {} ---", factionInfo.getFactionId());
 
-        // Load available crime slots with expected values
-        List<AvailableCrimeSlot> availableSlots = loadAvailableCrimeSlots(configConnection, ocDataConnection, factionInfo);
+        try {
+            // Step 1: Load available members with their CPR data
+            logger.info("STEP 1: Loading available members for faction {}", factionInfo.getFactionId());
+            List<AvailableMember> availableMembers = loadAvailableMembers(configConnection, ocDataConnection, factionInfo);
+            logger.info("STEP 1 RESULT: Found {} available members for faction {}",
+                    availableMembers.size(), factionInfo.getFactionId());
 
-        if (availableMembers.isEmpty() || availableSlots.isEmpty()) {
-            logger.debug("Faction {} has {} members and {} slots available",
-                    factionInfo.getFactionId(), availableMembers.size(), availableSlots.size());
-            return new OptimizationResult(new ArrayList<>(), 0.0, availableSlots.size(), availableMembers.size());
+            // Step 2: Load available crime slots with expected values
+            logger.info("STEP 2: Loading available crime slots for faction {}", factionInfo.getFactionId());
+            List<AvailableCrimeSlot> availableSlots = loadAvailableCrimeSlots(configConnection, ocDataConnection, factionInfo);
+            logger.info("STEP 2 RESULT: Found {} available crime slots for faction {}",
+                    availableSlots.size(), factionInfo.getFactionId());
+
+            // Early exit conditions
+            if (availableMembers.isEmpty() && availableSlots.isEmpty()) {
+                logger.info("EARLY EXIT: Faction {} has no available members AND no available slots", factionInfo.getFactionId());
+                return new OptimizationResult(new ArrayList<>(), 0.0, 0, 0);
+            } else if (availableMembers.isEmpty()) {
+                logger.info("EARLY EXIT: Faction {} has no available members (all busy or none exist)", factionInfo.getFactionId());
+                return new OptimizationResult(new ArrayList<>(), 0.0, availableSlots.size(), 0);
+            } else if (availableSlots.isEmpty()) {
+                logger.info("EARLY EXIT: Faction {} has no available crime slots", factionInfo.getFactionId());
+                return new OptimizationResult(new ArrayList<>(), 0.0, 0, availableMembers.size());
+            }
+
+            // Step 3: Run optimization
+            logger.info("STEP 3: Running optimization algorithm - {} members to {} slots for faction {}",
+                    availableMembers.size(), availableSlots.size(), factionInfo.getFactionId());
+
+            // Log sample data for debugging
+            if (logger.isDebugEnabled()) {
+                logger.debug("Sample available members for faction {}:", factionInfo.getFactionId());
+                availableMembers.stream().limit(3).forEach(member -> logger.debug("  {}", member));
+
+                logger.debug("Sample available slots for faction {}:", factionInfo.getFactionId());
+                availableSlots.stream().limit(3).forEach(slot -> logger.debug("  {}", slot));
+            }
+
+            OptimizationResult result = optimizeAssignments(availableMembers, availableSlots);
+
+            logger.info("STEP 3 RESULT: Optimization completed for faction {} - {}", factionInfo.getFactionId(), result);
+
+            return result;
+
+        } catch (SQLException e) {
+            logger.error("SQL ERROR: Failed to optimize assignments for faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+            throw e;
+        } catch (Exception e) {
+            logger.error("GENERAL ERROR: Unexpected error optimizing faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+            throw new SQLException("Optimization failed for faction " + factionInfo.getFactionId(), e);
         }
-
-        logger.info("Optimizing {} members to {} slots for faction {}",
-                availableMembers.size(), availableSlots.size(), factionInfo.getFactionId());
-
-        // Run the optimization algorithm
-        return optimizeAssignments(availableMembers, availableSlots);
     }
 
     /**
@@ -263,6 +355,8 @@ public class CrimeAssignmentOptimizer {
      */
     private static OptimizationResult optimizeAssignments(List<AvailableMember> members,
                                                           List<AvailableCrimeSlot> slots) {
+
+        logger.debug("Running optimization algorithm with {} members and {} slots", members.size(), slots.size());
 
         // Create scoring matrix
         double[][] scoreMatrix = createScoringMatrix(members, slots);
@@ -277,6 +371,9 @@ public class CrimeAssignmentOptimizer {
 
         // Sort assignments by score (highest first)
         assignments.sort((a, b) -> Double.compare(b.getOptimizationScore(), a.getOptimizationScore()));
+
+        logger.debug("Optimization algorithm completed: {} assignments, total score: {:.3f}",
+                assignments.size(), totalScore);
 
         return new OptimizationResult(assignments, totalScore, unfilledSlots, unassignedMembers);
     }
@@ -403,7 +500,7 @@ public class CrimeAssignmentOptimizer {
 
         Integer cpr = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
 
-        // Emphasize slot priority first (since it's now 30% of the algorithm)
+        // Emphasize slot priority first (since it's now 50% of the algorithm)
         if (slot.getSlotPriority() > 2.0) {
             reasons.add("Critical priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
         } else if (slot.getSlotPriority() > 1.5) {
@@ -425,6 +522,7 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Load available members with their CPR data
+     * Enhanced with comprehensive debugging and error handling
      */
     private static List<AvailableMember> loadAvailableMembers(Connection configConnection,
                                                               Connection ocDataConnection,
@@ -433,34 +531,64 @@ public class CrimeAssignmentOptimizer {
         String availableMembersTable = Constants.TABLE_NAME_AVAILABLE_MEMBERS + factionInfo.getDbSuffix();
         String cprTable = Constants.TABLE_NAME_CPR + factionInfo.getDbSuffix();
 
+        logger.info("DEBUG: Attempting to load members from OC_DATA table: {}", availableMembersTable);
+        logger.info("DEBUG: Will also load CPR data from table: {}", cprTable);
+
+        // Check if tables exist first
+        try {
+            verifyTableExists(ocDataConnection, availableMembersTable, "available members");
+            logger.info("✓ Table {} exists and is accessible", availableMembersTable);
+        } catch (SQLException e) {
+            logger.error("✗ CRITICAL: Available members table {} does not exist for faction {}: {}",
+                    availableMembersTable, factionInfo.getFactionId(), e.getMessage());
+            throw new SQLException("Available members table missing for faction " + factionInfo.getFactionId(), e);
+        }
+
         // First get available members
         String membersSql = "SELECT user_id, username, last_joined_crime_date FROM " + availableMembersTable +
                 " WHERE is_in_oc = false ORDER BY username";
 
+        logger.debug("Executing SQL: {}", membersSql);
+
         try (PreparedStatement membersStmt = ocDataConnection.prepareStatement(membersSql);
              ResultSet membersRs = membersStmt.executeQuery()) {
 
+            int memberCount = 0;
             while (membersRs.next()) {
+                memberCount++;
                 String userId = membersRs.getString("user_id");
                 String username = membersRs.getString("username");
                 Timestamp lastJoinedCrimeDate = membersRs.getTimestamp("last_joined_crime_date");
 
+                logger.debug("Loading member {}: {} ({})", memberCount, username, userId);
+
                 // Load CPR data for this member
                 Map<String, Integer> cprData = loadMemberCPRData(ocDataConnection, cprTable, userId);
+                logger.debug("  Loaded {} CPR entries for member {}", cprData.size(), username);
 
                 members.add(new AvailableMember(userId, username, cprData, lastJoinedCrimeDate));
             }
+
+            logger.info("✓ Successfully loaded {} members from table {} for faction {}",
+                    memberCount, availableMembersTable, factionInfo.getFactionId());
+
+            if (memberCount == 0) {
+                logger.warn("WARNING: No available members found for faction {} (all may be in crimes or table empty)",
+                        factionInfo.getFactionId());
+            }
+
         } catch (SQLException e) {
-            logger.debug("Could not load available members for faction {} (table might not exist): {}",
-                    factionInfo.getFactionId(), e.getMessage());
+            logger.error("✗ ERROR: Failed to load available members for faction {} from table {}: {}",
+                    factionInfo.getFactionId(), availableMembersTable, e.getMessage());
+            throw e;
         }
 
-        logger.debug("Loaded {} available members for faction {}", members.size(), factionInfo.getFactionId());
         return members;
     }
 
     /**
      * Load CPR data for a specific member
+     * Enhanced with debugging
      */
     private static Map<String, Integer> loadMemberCPRData(Connection ocDataConnection, String cprTable,
                                                           String userId) throws SQLException {
@@ -493,11 +621,14 @@ public class CrimeAssignmentOptimizer {
                             cprData.put(crimeSlotKey, cprValue);
                         }
                     }
+                } else {
+                    logger.debug("No CPR data found for user {} in table {}", userId, cprTable);
                 }
             }
         } catch (SQLException e) {
             logger.debug("Could not load CPR data for user {} from table {}: {}",
                     userId, cprTable, e.getMessage());
+            // Don't throw - member can still be processed without CPR data
         }
 
         return cprData;
@@ -510,8 +641,6 @@ public class CrimeAssignmentOptimizer {
         // This reverses the sanitization done in UpdateMemberCPR
         // Example: "btb_-_robber" -> "Break the Bank|Robber"
 
-        // This is a simplified conversion - you may need to enhance this
-        // based on your actual column naming patterns
         String[] parts = columnName.split("_-_", 2);
         if (parts.length == 2) {
             String crimeAbbrev = parts[0].toUpperCase();
@@ -564,16 +693,37 @@ public class CrimeAssignmentOptimizer {
         return result.toString();
     }
 
+    /**
+     * Load available crime slots with expected values
+     * Enhanced with comprehensive debugging and error handling
+     */
     private static List<AvailableCrimeSlot> loadAvailableCrimeSlots(Connection configConnection,
                                                                     Connection ocDataConnection,
                                                                     FactionInfo factionInfo) throws SQLException {
         List<AvailableCrimeSlot> slots = new ArrayList<>();
         String availableCrimesTable = "a_crimes_" + factionInfo.getDbSuffix();
 
-        logger.info("DEBUG: Attempting to load crimes from table: {}", availableCrimesTable);
+        logger.info("DEBUG: Attempting to load crime slots from OC_DATA table: {}", availableCrimesTable);
+
+        // Check if table exists first
+        try {
+            verifyTableExists(ocDataConnection, availableCrimesTable, "available crimes");
+            logger.info("✓ Table {} exists and is accessible", availableCrimesTable);
+        } catch (SQLException e) {
+            logger.error("✗ CRITICAL: Available crimes table {} does not exist for faction {}: {}",
+                    availableCrimesTable, factionInfo.getFactionId(), e.getMessage());
+            throw new SQLException("Available crimes table missing for faction " + factionInfo.getFactionId(), e);
+        }
 
         // First, load the OC2 crimes reference data from CONFIG database
+        logger.info("Loading crime reward data from CONFIG database...");
         Map<String, CrimeRewardData> crimeRewards = loadCrimeRewardsFromConfig(configConnection);
+        logger.info("✓ Loaded {} crime reward entries from CONFIG database", crimeRewards.size());
+
+        // Load role priorities from CONFIG database
+        logger.info("Loading role priorities from CONFIG database...");
+        Map<String, Double> rolePriorities = loadRolePrioritiesFromConfig(configConnection);
+        logger.info("✓ Loaded {} role priority entries from CONFIG database", rolePriorities.size());
 
         // Then load available crimes from OC_DATA database
         String slotsSql = "SELECT crime_id, name, difficulty, expired_at, " +
@@ -581,11 +731,14 @@ public class CrimeAssignmentOptimizer {
                 "FROM " + availableCrimesTable + " " +
                 "ORDER BY difficulty DESC";
 
+        logger.debug("Executing SQL: {}", slotsSql);
+
         try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql)) {
-            logger.info("DEBUG: Executing query on OC_DATA: {}", slotsSql);
 
             try (ResultSet slotsRs = slotsStmt.executeQuery()) {
                 int rowCount = 0;
+                Map<String, Integer> crimeSlotCounts = new HashMap<>();
+
                 while (slotsRs.next()) {
                     rowCount++;
                     Long crimeId = slotsRs.getLong("crime_id");
@@ -595,33 +748,92 @@ public class CrimeAssignmentOptimizer {
                     Integer difficulty = slotsRs.getObject("difficulty", Integer.class);
                     Timestamp expiredAt = slotsRs.getTimestamp("expired_at");
 
+                    // Track crime types for summary
+                    crimeSlotCounts.merge(crimeName, 1, Integer::sum);
+
                     // Get reward data from the config database lookup
                     CrimeRewardData rewardData = crimeRewards.get(crimeName);
                     Long rewardsHigh = rewardData != null ? rewardData.getHighValue() : null;
                     Long rewardsLow = rewardData != null ? rewardData.getLowValue() : null;
 
                     Long expectedValue = calculateExpectedValue(rewardsHigh, rewardsLow, difficulty);
-                    Double slotPriority = calculateSlotPriority(slotPosition, difficulty);
+                    Double slotPriority = calculateSlotPriority(crimeName, slotPosition, difficulty, rolePriorities);
 
-                    slots.add(new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
-                            difficulty, expiredAt, expectedValue, slotPriority));
+                    AvailableCrimeSlot slot = new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
+                            difficulty, expiredAt, expectedValue, slotPriority);
+
+                    slots.add(slot);
+
+                    if (rowCount <= 5) { // Log first few entries for debugging
+                        logger.debug("  Slot {}: {}", rowCount, slot);
+                    }
                 }
-                logger.info("DEBUG: Found {} crime slots in table {}", rowCount, availableCrimesTable);
+
+                logger.info("✓ Successfully loaded {} crime slots from table {} for faction {}",
+                        rowCount, availableCrimesTable, factionInfo.getFactionId());
+
+                // Log summary by crime type
+                if (!crimeSlotCounts.isEmpty()) {
+                    logger.info("  Crime slot breakdown for faction {}:", factionInfo.getFactionId());
+                    crimeSlotCounts.entrySet().stream()
+                            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                            .forEach(entry -> logger.info("    {}: {} slots", entry.getKey(), entry.getValue()));
+                } else {
+                    logger.warn("WARNING: No crime slots found for faction {} (no crimes spawned or all full)",
+                            factionInfo.getFactionId());
+                }
+
             }
         } catch (SQLException e) {
-            logger.error("ERROR: Could not load available crime slots for faction {} from table {}: {}",
+            logger.error("✗ ERROR: Could not load available crime slots for faction {} from table {}: {}",
                     factionInfo.getFactionId(), availableCrimesTable, e.getMessage());
             throw e;
         }
 
-        logger.info("DEBUG: Loaded {} available crime slots for faction {}", slots.size(), factionInfo.getFactionId());
         return slots;
     }
 
+    /**
+     * Load role priorities from CONFIG database
+     */
+    private static Map<String, Double> loadRolePrioritiesFromConfig(Connection configConnection) throws SQLException {
+        Map<String, Double> priorities = new HashMap<>();
+
+        String prioritiesSql = "SELECT role_name, weight FROM crimes_roles_priority";
+
+        logger.debug("Loading role priorities with SQL: {}", prioritiesSql);
+
+        try (PreparedStatement stmt = configConnection.prepareStatement(prioritiesSql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String roleName = rs.getString("role_name");
+                Double weight = rs.getObject("weight", Double.class);
+
+                if (roleName != null && weight != null) {
+                    priorities.put(roleName, weight);
+                    logger.debug("Loaded role priority: {} = {}", roleName, weight);
+                }
+            }
+        } catch (SQLException e) {
+            logger.warn("Could not load role priorities from CONFIG database table crimes_roles_priority: {}",
+                    e.getMessage());
+            logger.warn("Will use default priority values for role assignment");
+            // Don't throw - we can still process with default values
+        }
+
+        return priorities;
+    }
+
+    /**
+     * Load crime reward data from CONFIG database
+     */
     private static Map<String, CrimeRewardData> loadCrimeRewardsFromConfig(Connection configConnection) throws SQLException {
         Map<String, CrimeRewardData> rewards = new HashMap<>();
 
         String rewardsSql = "SELECT crime_name, rewards_value_high, rewards_value_low FROM " + Constants.TABLE_NAME_OC2_CRIMES;
+
+        logger.debug("Loading crime rewards with SQL: {}", rewardsSql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(rewardsSql);
              ResultSet rs = stmt.executeQuery()) {
@@ -634,10 +846,11 @@ public class CrimeAssignmentOptimizer {
                 rewards.put(crimeName, new CrimeRewardData(highValue, lowValue));
             }
         } catch (SQLException e) {
-            logger.warn("Could not load crime rewards from config database: {}", e.getMessage());
+            logger.warn("Could not load crime rewards from CONFIG database table {}: {}",
+                    Constants.TABLE_NAME_OC2_CRIMES, e.getMessage());
+            // Don't throw - we can still process without reward data
         }
 
-        logger.info("DEBUG: Loaded {} crime reward entries from config database", rewards.size());
         return rewards;
     }
 
@@ -672,24 +885,26 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Calculate slot priority (enhanced for increased weighting)
+     * Calculate slot priority using actual database values from crimes_roles_priority table
+     * Now checks both crime name and role name for accurate priority lookup
+     * Uses exact role matching including #number (e.g., "Robber #1", "Robber #2")
      */
-    private static Double calculateSlotPriority(String slotPosition, Integer difficulty) {
+    private static Double calculateSlotPriority(String crimeName, String slotPosition, Integer difficulty,
+                                                Map<String, Double> rolePriorities) {
         double basePriority = 1.0;
 
-        // Enhanced slot priority calculation since it now has 30% weight
-        if (slotPosition != null) {
-            String position = slotPosition.toLowerCase();
+        // Use actual priority from database if available (crime-specific role priority)
+        if (crimeName != null && slotPosition != null && rolePriorities != null) {
+            // Create key combining crime name and exact role name (including #number)
+            String crimeRoleKey = crimeName + "|" + slotPosition;
+            Double dbPriority = rolePriorities.get(crimeRoleKey);
 
-            // Higher priority for critical roles
-            if (position.contains("robber") || position.contains("hacker")) {
-                basePriority = 2.0; // Critical roles
-            } else if (position.contains("muscle") || position.contains("engineer")) {
-                basePriority = 1.8; // Important support roles
-            } else if (position.contains("bomber") || position.contains("thief")) {
-                basePriority = 1.6; // Specialized roles
+            if (dbPriority != null) {
+                basePriority = dbPriority;
+                logger.debug("Using database priority for '{}' role '{}': {}", crimeName, slotPosition, basePriority);
             } else {
-                basePriority = 1.4; // Standard roles
+                logger.debug("No database priority found for '{}' role '{}', using default: {}",
+                        crimeName, slotPosition, basePriority);
             }
         }
 
@@ -698,11 +913,14 @@ public class CrimeAssignmentOptimizer {
             basePriority *= (1.0 + (difficulty - 5) * 0.1);
         }
 
-        return Math.min(basePriority, 3.0); // Cap at 3.0 for balance
+        return Math.min(basePriority, 5.0); // Increased cap to accommodate database values
     }
+
+
 
     /**
      * Get faction information from the config database
+     * Enhanced with debugging
      */
     private static List<FactionInfo> getFactionInfo(Connection configConnection) throws SQLException {
         List<FactionInfo> factions = new ArrayList<>();
@@ -711,22 +929,39 @@ public class CrimeAssignmentOptimizer {
                 "FROM " + Constants.TABLE_NAME_FACTIONS + " " +
                 "WHERE oc2_enabled = true";
 
+        logger.info("Loading faction info from CONFIG database with SQL: {}", sql);
+
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
+            int totalFactions = 0;
+            int validFactions = 0;
+
             while (rs.next()) {
+                totalFactions++;
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
 
+                logger.debug("Found faction record {}: ID={}, Suffix={}", totalFactions, factionId, dbSuffix);
+
                 if (factionId != null && dbSuffix != null && isValidDbSuffix(dbSuffix)) {
                     factions.add(new FactionInfo(factionId, dbSuffix));
+                    validFactions++;
+                    logger.info("✓ Added valid faction {} with suffix {} to processing list", factionId, dbSuffix);
                 } else {
-                    logger.warn("Skipping faction with invalid data: factionId={}, dbSuffix={}", factionId, dbSuffix);
+                    logger.warn("✗ Skipping invalid faction: factionId={}, dbSuffix={}", factionId, dbSuffix);
                 }
             }
+
+            logger.info("✓ Faction loading summary: {} total records, {} valid OC2-enabled factions",
+                    totalFactions, validFactions);
         }
 
-        logger.info("Found {} OC2-enabled factions for optimization", factions.size());
+        if (factions.isEmpty()) {
+            logger.warn("WARNING: No valid OC2-enabled factions found in CONFIG database");
+            logger.info("  Check that table {} has records with oc2_enabled = true", Constants.TABLE_NAME_FACTIONS);
+        }
+
         return factions;
     }
 
@@ -734,10 +969,18 @@ public class CrimeAssignmentOptimizer {
      * Validate db suffix for SQL injection prevention
      */
     private static boolean isValidDbSuffix(String dbSuffix) {
-        return dbSuffix != null &&
-                dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
-                !dbSuffix.isEmpty() &&
-                dbSuffix.length() <= 50;
+        if (dbSuffix == null || dbSuffix.isEmpty() || dbSuffix.length() > 50) {
+            return false;
+        }
+
+        // Must start with letter and contain only letters, numbers, and underscores
+        boolean isValid = dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$");
+
+        if (!isValid) {
+            logger.warn("Invalid db_suffix format: '{}' - must start with letter and contain only alphanumeric/underscore", dbSuffix);
+        }
+
+        return isValid;
     }
 
     /**
@@ -767,33 +1010,42 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Generate comprehensive assignment recommendations (urgency-free approach)
+     * Enhanced with debugging
      */
     public static AssignmentRecommendation generateAssignmentRecommendations(Connection configConnection,
                                                                              Connection ocDataConnection,
                                                                              FactionInfo factionInfo) throws SQLException {
 
+        logger.info("--- Generating assignment recommendations for faction {} ---", factionInfo.getFactionId());
+
         OptimizationResult result = optimizeFactionCrimeAssignments(configConnection, ocDataConnection, factionInfo);
 
-        logger.info("DEBUG: Optimization result - {} assignments, {} unfilled slots, {} unassigned members",
-                result.getAssignments().size(),
-                result.getUnfilledSlots(),
-                result.getUnassignedMembers());
+        logger.info("Optimization result for faction {}: {}", factionInfo.getFactionId(), result);
 
         if (result.getAssignments().isEmpty()) {
+            logger.info("No assignments found for faction {} - returning empty recommendation", factionInfo.getFactionId());
             return new AssignmentRecommendation(new ArrayList<>(),
-                    List.of("No optimal assignments found"), new HashMap<>(), 0L);
+                    List.of("No optimal assignments found - check member availability and crime slots"),
+                    new HashMap<>(), 0L);
         }
+
+        logger.info("Processing {} assignments for recommendations...", result.getAssignments().size());
 
         // Calculate crime completion probabilities
         Map<String, Double> completionProbs = calculateCrimeCompletionProbabilities(result.getAssignments());
+        logger.debug("Calculated completion probabilities for {} crimes", completionProbs.size());
 
         // Generate strategic recommendations (urgency removed)
         List<String> strategicRecommendations = generateStrategicRecommendations(result, factionInfo);
+        logger.debug("Generated {} strategic recommendations", strategicRecommendations.size());
 
         // Calculate total expected value
         long totalExpectedValue = result.getAssignments().stream()
                 .mapToLong(assignment -> assignment.getSlot().getExpectedValue())
                 .sum();
+
+        logger.info("✓ Generated recommendations for faction {} - {} assignments, total expected value: ${}",
+                factionInfo.getFactionId(), result.getAssignments().size(), formatCurrency(totalExpectedValue));
 
         return new AssignmentRecommendation(result.getAssignments(), strategicRecommendations,
                 completionProbs, totalExpectedValue);
@@ -904,7 +1156,6 @@ public class CrimeAssignmentOptimizer {
         return recommendations;
     }
 
-
     /**
      * Discord member mapping from the members table
      */
@@ -926,97 +1177,173 @@ public class CrimeAssignmentOptimizer {
         public String getMention() {
             return discordId != null ? "<@" + discordId + ">" : username;
         }
+
+        @Override
+        public String toString() {
+            return String.format("DiscordMemberMapping{userId='%s', username='%s', discordId='%s'}",
+                    userId, username, discordId);
+        }
     }
 
     /**
      * Send Discord assignment notifications for all factions
+     * Enhanced with comprehensive debugging and error tracking
      */
     public static void sendDiscordAssignmentNotifications() throws SQLException {
+        logger.info("==================== STARTING DISCORD NOTIFICATIONS ====================");
         logger.info("Sending Discord crime assignment notifications to all factions");
 
         String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
         String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
 
         if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
+            logger.error("CRITICAL: DATABASE_URL_CONFIG environment variable not set");
             throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
         }
 
         if (ocDataDatabaseUrl == null || ocDataDatabaseUrl.isEmpty()) {
+            logger.error("CRITICAL: DATABASE_URL_OC_DATA environment variable not set");
             throw new IllegalStateException("DATABASE_URL_OC_DATA environment variable not set");
         }
+
+        logger.info("Database URLs loaded for Discord notifications");
 
         try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
              Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
 
-            logger.info("Database connections established successfully");
+            logger.info("✓ Database connections established for Discord notifications");
 
             List<FactionInfo> factions = getFactionInfo(configConnection);
             if (factions.isEmpty()) {
-                logger.warn("No OC2-enabled factions found for Discord notifications");
+                logger.warn("WARNING: No OC2-enabled factions found for Discord notifications");
                 return;
             }
 
+            logger.info("✓ Found {} factions to send Discord notifications to", factions.size());
+            for (int i = 0; i < factions.size(); i++) {
+                FactionInfo faction = factions.get(i);
+                logger.info("  {}. Will notify faction: {} (suffix: {})", i + 1, faction.getFactionId(), faction.getDbSuffix());
+            }
+
+            int processedCount = 0;
             int successfulNotifications = 0;
             int failedNotifications = 0;
+            int skippedNotifications = 0;
 
             for (FactionInfo factionInfo : factions) {
+                logger.info("==================== DISCORD NOTIFICATION {}/{} ====================",
+                        processedCount + 1, factions.size());
+                logger.info("Processing Discord notification for faction: {}", factionInfo);
+
                 try {
                     boolean success = sendFactionAssignmentNotification(configConnection, ocDataConnection, factionInfo);
                     if (success) {
                         successfulNotifications++;
-                        logger.info("✓ Sent Discord assignment notification to faction {}", factionInfo.getFactionId());
+                        logger.info("✓ SUCCESS: Sent Discord assignment notification to faction {}",
+                                factionInfo.getFactionId());
                     } else {
                         failedNotifications++;
-                        logger.warn("✗ Failed to send Discord assignment notification to faction {}", factionInfo.getFactionId());
+                        logger.warn("✗ FAILED: Discord assignment notification failed for faction {}",
+                                factionInfo.getFactionId());
                     }
+
+                    processedCount++;
 
                 } catch (Exception e) {
                     failedNotifications++;
-                    logger.error("Error sending Discord notification to faction {}: {}",
+                    processedCount++;
+                    logger.error("✗ EXCEPTION: Error sending Discord notification to faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                 }
+
+                logger.info("==================== COMPLETED NOTIFICATION {} ====================",
+                        factionInfo.getFactionId());
             }
 
-            logger.info("Discord assignment notifications completed: {} successful, {} failed",
-                    successfulNotifications, failedNotifications);
+            // Final summary
+            logger.info("==================== DISCORD NOTIFICATIONS SUMMARY ====================");
+            logger.info("Discord assignment notifications completed:");
+            logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
+            logger.info("  Successful notifications: {}", successfulNotifications);
+            logger.info("  Failed notifications: {}", failedNotifications);
+            logger.info("  Skipped notifications: {}", skippedNotifications);
+            logger.info("  Success rate: {:.1f}%", processedCount > 0 ? (successfulNotifications * 100.0 / processedCount) : 0.0);
 
         } catch (SQLException e) {
-            logger.error("Database error during Discord assignment notifications", e);
+            logger.error("CRITICAL: Database error during Discord assignment notifications", e);
             throw e;
         }
+
+        logger.info("==================== DISCORD NOTIFICATIONS COMPLETE ====================");
     }
 
     /**
      * Send Discord assignment notification for a single faction
+     * Enhanced with detailed debugging
      */
     private static boolean sendFactionAssignmentNotification(Connection configConnection,
                                                              Connection ocDataConnection,
                                                              FactionInfo factionInfo) throws SQLException {
 
-        // Generate assignment recommendations
-        AssignmentRecommendation recommendation = generateAssignmentRecommendations(
-                configConnection, ocDataConnection, factionInfo);
+        logger.info("--- Processing Discord notification for faction {} ---", factionInfo.getFactionId());
 
-        if (recommendation.getImmediateAssignments().isEmpty()) {
-            logger.debug("No assignments to notify for faction {}", factionInfo.getFactionId());
-            return true; // Not an error, just nothing to send
-        }
+        try {
+            // Step 1: Generate assignment recommendations
+            logger.info("STEP 1: Generating assignment recommendations for faction {}", factionInfo.getFactionId());
+            AssignmentRecommendation recommendation = generateAssignmentRecommendations(
+                    configConnection, ocDataConnection, factionInfo);
 
-        // Load Discord member mappings from CONFIG database (not OC_DATA)
-        Map<String, DiscordMemberMapping> memberMappings = loadDiscordMemberMappings(
-                configConnection, factionInfo); // <- Changed from ocDataConnection to configConnection
+            logger.info("STEP 1 RESULT: Generated {} assignments for faction {}",
+                    recommendation.getImmediateAssignments().size(), factionInfo.getFactionId());
 
-        if (memberMappings.isEmpty()) {
-            logger.warn("No Discord member mappings found for faction {}", factionInfo.getFactionId());
+            if (recommendation.getImmediateAssignments().isEmpty()) {
+                logger.info("STEP 1 SKIP: No assignments found for faction {} - no Discord notification needed",
+                        factionInfo.getFactionId());
+                return true; // Not an error, just nothing to send
+            }
+
+            // Step 2: Load Discord member mappings from CONFIG database
+            logger.info("STEP 2: Loading Discord member mappings for faction {}", factionInfo.getFactionId());
+            Map<String, DiscordMemberMapping> memberMappings = loadDiscordMemberMappings(
+                    configConnection, factionInfo);
+
+            logger.info("STEP 2 RESULT: Found {} Discord mappings for faction {}",
+                    memberMappings.size(), factionInfo.getFactionId());
+
+            if (memberMappings.isEmpty()) {
+                logger.error("STEP 2 FAILED: No Discord member mappings found for faction {} - cannot send notification",
+                        factionInfo.getFactionId());
+                return false;
+            }
+
+            // Step 3: Send Discord message
+            logger.info("STEP 3: Sending Discord message for faction {} with {} assignments to {} Discord members",
+                    factionInfo.getFactionId(), recommendation.getImmediateAssignments().size(), memberMappings.size());
+
+            boolean success = DiscordMessages.sendCrimeAssignmentToAllMembers(factionInfo, recommendation, memberMappings);
+
+            if (success) {
+                logger.info("STEP 3 SUCCESS: Discord message sent successfully for faction {}", factionInfo.getFactionId());
+            } else {
+                logger.error("STEP 3 FAILED: Discord message send failed for faction {}", factionInfo.getFactionId());
+            }
+
+            return success;
+
+        } catch (SQLException e) {
+            logger.error("SQL ERROR: Database error processing faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+            throw e;
+        } catch (Exception e) {
+            logger.error("GENERAL ERROR: Unexpected error processing faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
             return false;
         }
-
-        // Create and send Discord message
-        return DiscordMessages.sendCrimeAssignmentToAllMembers(factionInfo, recommendation, memberMappings);
     }
 
     /**
      * Load Discord member mappings from the members table in CONFIG database
+     * Enhanced with comprehensive debugging
      */
     private static Map<String, DiscordMemberMapping> loadDiscordMemberMappings(Connection configConnection,
                                                                                FactionInfo factionInfo) throws SQLException {
@@ -1025,37 +1352,281 @@ public class CrimeAssignmentOptimizer {
         // Fixed table name format: members_factionsuffix
         String membersTable = "members_" + factionInfo.getDbSuffix();
 
+        logger.info("DEBUG: Loading Discord mappings from CONFIG database table: {}", membersTable);
+
+        // Check if table exists first
+        try {
+            verifyTableExists(configConnection, membersTable, "members");
+            logger.info("✓ Table {} exists in CONFIG database", membersTable);
+        } catch (SQLException e) {
+            logger.error("✗ CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
+                    membersTable, factionInfo.getFactionId(), e.getMessage());
+            throw new SQLException("Members table missing in CONFIG database for faction " + factionInfo.getFactionId(), e);
+        }
+
         // Fixed column name: user_discord_id instead of discord_id
         String sql = "SELECT user_id, username, user_discord_id FROM " + membersTable +
                 " WHERE user_discord_id IS NOT NULL AND user_discord_id != ''";
 
-        logger.info("DEBUG: Loading Discord mappings from CONFIG database table: {}", membersTable);
+        logger.debug("Executing SQL: {}", sql);
 
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
 
+            int totalMembers = 0;
             int mappingCount = 0;
+
             while (rs.next()) {
+                totalMembers++;
                 String userId = rs.getString("user_id");
                 String username = rs.getString("username");
-                String discordId = rs.getString("user_discord_id"); // Fixed column name
+                String discordId = rs.getString("user_discord_id");
+
+                logger.debug("Found member {}: {} ({}) - Discord ID: {}",
+                        totalMembers, username, userId, discordId != null ? "SET" : "NULL");
 
                 if (userId != null && discordId != null && !discordId.trim().isEmpty()) {
                     mappings.put(userId, new DiscordMemberMapping(userId, username, discordId.trim()));
                     mappingCount++;
+                } else {
+                    logger.debug("  Skipping member {} - missing user_id or discord_id", username);
                 }
             }
 
-            logger.info("DEBUG: Loaded {} Discord member mappings for faction {}", mappingCount, factionInfo.getFactionId());
+            logger.info("✓ Discord mapping summary for faction {}: {} total members, {} with Discord IDs",
+                    factionInfo.getFactionId(), totalMembers, mappingCount);
+
+            if (mappingCount == 0 && totalMembers > 0) {
+                logger.warn("WARNING: Faction {} has {} members but none have Discord IDs configured",
+                        factionInfo.getFactionId(), totalMembers);
+            } else if (mappingCount == 0) {
+                logger.warn("WARNING: No members found in table {} for faction {}",
+                        membersTable, factionInfo.getFactionId());
+            }
 
         } catch (SQLException e) {
-            logger.error("ERROR: Could not load Discord member mappings for faction {} from table {}: {}",
+            logger.error("✗ ERROR: Could not load Discord member mappings for faction {} from table {}: {}",
                     factionInfo.getFactionId(), membersTable, e.getMessage());
-            throw e; // Don't silently ignore this
+            throw e;
         }
 
         return mappings;
     }
 
+    /**
+     * Utility method to verify a table exists and is accessible
+     */
+    private static void verifyTableExists(Connection connection, String tableName, String tableType) throws SQLException {
+        String checkTableSql = "SELECT 1 FROM " + tableName + " LIMIT 1";
 
+        try (PreparedStatement checkStmt = connection.prepareStatement(checkTableSql);
+             ResultSet checkRs = checkStmt.executeQuery()) {
+            // If we get here, table exists and is accessible
+        } catch (SQLException e) {
+            throw new SQLException(String.format("%s table '%s' does not exist or is not accessible", tableType, tableName), e);
+        }
+    }
+
+    /**
+     * Utility method to mask database URLs for safe logging
+     */
+    private static String maskDatabaseUrl(String url) {
+        if (url == null) return "null";
+
+        // Mask password in connection string
+        return url.replaceAll(":[^:/@]*@", ":***@");
+    }
+
+    /**
+     * Format currency for logging
+     */
+    private static String formatCurrency(long amount) {
+        if (amount >= 1_000_000_000L) {
+            return String.format("%.1fB", amount / 1_000_000_000.0);
+        } else if (amount >= 1_000_000L) {
+            return String.format("%.1fM", amount / 1_000_000.0);
+        } else if (amount >= 1_000L) {
+            return String.format("%.1fK", amount / 1_000.0);
+        } else {
+            return String.valueOf(amount);
+        }
+    }
+
+    /**
+     * Main method for testing - runs optimization and Discord notifications
+     */
+    public static void main(String[] args) {
+        logger.info("Starting CrimeAssignmentOptimizer test run...");
+
+        try {
+            // First run the optimization
+            logger.info("=== PHASE 1: RUNNING OPTIMIZATION ===");
+            optimizeAllFactionsCrimeAssignments();
+
+            logger.info("=== PHASE 2: SENDING DISCORD NOTIFICATIONS ===");
+            sendDiscordAssignmentNotifications();
+
+            logger.info("=== TEST RUN COMPLETED SUCCESSFULLY ===");
+
+        } catch (Exception e) {
+            logger.error("Test run failed with exception: {}", e.getMessage(), e);
+            System.exit(1);
+        }
+    }
+
+    // ==================== DEBUGGING HELPER METHODS ====================
+
+    /**
+     * Debug method to check faction table structure and data
+     */
+    public static void debugFactionTables() throws SQLException {
+        logger.info("==================== FACTION TABLE DEBUG ====================");
+
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+
+        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
+             Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+
+            // Check factions table
+            String factionsSql = "SELECT faction_id, db_suffix, oc2_enabled FROM " + Constants.TABLE_NAME_FACTIONS +
+                    " ORDER BY faction_id";
+
+            logger.info("Checking factions table structure and data:");
+
+            try (PreparedStatement stmt = configConnection.prepareStatement(factionsSql);
+                 ResultSet rs = stmt.executeQuery()) {
+
+                int count = 0;
+                while (rs.next()) {
+                    count++;
+                    String factionId = rs.getString("faction_id");
+                    String dbSuffix = rs.getString("db_suffix");
+                    boolean oc2Enabled = rs.getBoolean("oc2_enabled");
+
+                    logger.info("  Faction {}: ID={}, Suffix={}, OC2Enabled={}",
+                            count, factionId, dbSuffix, oc2Enabled);
+
+                    if (oc2Enabled) {
+                        // Check if required tables exist for this faction
+                        checkFactionTables(configConnection, ocDataConnection, new FactionInfo(factionId, dbSuffix));
+                    }
+                }
+
+                logger.info("Total factions found: {}", count);
+
+            } catch (SQLException e) {
+                logger.error("Error checking factions table: {}", e.getMessage(), e);
+            }
+        }
+
+        logger.info("==================== FACTION DEBUG COMPLETE ====================");
+    }
+
+    /**
+     * Check if all required tables exist for a faction
+     */
+    private static void checkFactionTables(Connection configConnection, Connection ocDataConnection, FactionInfo factionInfo) {
+        logger.info("    Checking tables for faction {} (suffix: {})", factionInfo.getFactionId(), factionInfo.getDbSuffix());
+
+        // Tables to check in CONFIG database
+        String[] configTables = {
+                "members_" + factionInfo.getDbSuffix()
+        };
+
+        // Tables to check in OC_DATA database
+        String[] ocDataTables = {
+                "a_crimes_" + factionInfo.getDbSuffix(),
+                Constants.TABLE_NAME_AVAILABLE_MEMBERS + factionInfo.getDbSuffix(),
+                Constants.TABLE_NAME_CPR + factionInfo.getDbSuffix()
+        };
+
+        // Check CONFIG tables
+        for (String table : configTables) {
+            try {
+                verifyTableExists(configConnection, table, "CONFIG");
+                logger.info("      ✓ CONFIG table exists: {}", table);
+            } catch (SQLException e) {
+                logger.warn("      ✗ CONFIG table missing: {} - {}", table, e.getMessage());
+            }
+        }
+
+        // Check OC_DATA tables
+        for (String table : ocDataTables) {
+            try {
+                verifyTableExists(ocDataConnection, table, "OC_DATA");
+                logger.info("      ✓ OC_DATA table exists: {}", table);
+            } catch (SQLException e) {
+                logger.warn("      ✗ OC_DATA table missing: {} - {}", table, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Debug method to check specific faction processing
+     */
+    public static void debugSingleFaction(String factionId) throws SQLException {
+        logger.info("==================== SINGLE FACTION DEBUG ====================");
+        logger.info("Debugging faction: {}", factionId);
+
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+        String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+
+        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
+             Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+
+            // Find faction info
+            String sql = "SELECT faction_id, db_suffix, oc2_enabled FROM " + Constants.TABLE_NAME_FACTIONS +
+                    " WHERE faction_id = ?";
+
+            try (PreparedStatement stmt = configConnection.prepareStatement(sql)) {
+                stmt.setString(1, factionId);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        String dbSuffix = rs.getString("db_suffix");
+                        boolean oc2Enabled = rs.getBoolean("oc2_enabled");
+
+                        logger.info("Found faction: ID={}, Suffix={}, OC2Enabled={}", factionId, dbSuffix, oc2Enabled);
+
+                        if (!oc2Enabled) {
+                            logger.warn("Faction {} is not OC2 enabled - stopping debug", factionId);
+                            return;
+                        }
+
+                        FactionInfo factionInfo = new FactionInfo(factionId, dbSuffix);
+
+                        // Check tables
+                        checkFactionTables(configConnection, ocDataConnection, factionInfo);
+
+                        // Try to run optimization
+                        logger.info("Attempting optimization for faction {}...", factionId);
+                        OptimizationResult result = optimizeFactionCrimeAssignments(configConnection, ocDataConnection, factionInfo);
+                        logger.info("Optimization result: {}", result);
+
+                        // Try to generate recommendations
+                        logger.info("Attempting to generate recommendations for faction {}...", factionId);
+                        AssignmentRecommendation recommendation = generateAssignmentRecommendations(
+                                configConnection, ocDataConnection, factionInfo);
+                        logger.info("Generated {} assignments", recommendation.getImmediateAssignments().size());
+
+                        // Try to load Discord mappings
+                        logger.info("Attempting to load Discord mappings for faction {}...", factionId);
+                        Map<String, DiscordMemberMapping> mappings = loadDiscordMemberMappings(configConnection, factionInfo);
+                        logger.info("Found {} Discord mappings", mappings.size());
+
+                        // Try to send notification
+                        logger.info("Attempting to send Discord notification for faction {}...", factionId);
+                        boolean success = sendFactionAssignmentNotification(configConnection, ocDataConnection, factionInfo);
+                        logger.info("Discord notification success: {}", success);
+
+                    } else {
+                        logger.warn("Faction {} not found in database", factionId);
+                    }
+                }
+            }
+        }
+
+        logger.info("==================== SINGLE FACTION DEBUG COMPLETE ====================");
+    }
 }
