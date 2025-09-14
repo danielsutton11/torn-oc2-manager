@@ -254,10 +254,6 @@ public class SendDiscordMessage {
      */
     public static boolean sendMessageNoRole(String factionId,String message,
                                       DiscordEmbed embed, String customUsername) {
-        if (message == null || message.trim().isEmpty()) {
-            logger.warn("Cannot send empty message to Discord");
-            return false;
-        }
 
         try {
             // Load Discord configuration from database

@@ -795,30 +795,58 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Load role priorities from CONFIG database
+     * Now loads crime-specific role priorities using both crime_name and role_name
      */
     private static Map<String, Double> loadRolePrioritiesFromConfig(Connection configConnection) throws SQLException {
         Map<String, Double> priorities = new HashMap<>();
 
-        String prioritiesSql = "SELECT role_name, weight FROM crimes_roles_priority";
+        String prioritiesSql = "SELECT crime_name, role_name, weight FROM crimes_roles_priority";
 
-        logger.debug("Loading role priorities with SQL: {}", prioritiesSql);
+        logger.debug("Loading crime-specific role priorities with SQL: {}", prioritiesSql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(prioritiesSql);
              ResultSet rs = stmt.executeQuery()) {
 
+            int totalEntries = 0;
             while (rs.next()) {
+                totalEntries++;
+                String crimeName = rs.getString("crime_name");
                 String roleName = rs.getString("role_name");
-                Double weight = rs.getObject("weight", Double.class);
+                // Handle both integer and double weight values
+                Object weightObj = rs.getObject("weight");
+                Double weight = null;
 
-                if (roleName != null && weight != null) {
-                    priorities.put(roleName, weight);
-                    logger.debug("Loaded role priority: {} = {}", roleName, weight);
+                if (weightObj != null) {
+                    if (weightObj instanceof Integer) {
+                        weight = ((Integer) weightObj).doubleValue();
+                    } else if (weightObj instanceof Double) {
+                        weight = (Double) weightObj;
+                    } else if (weightObj instanceof Number) {
+                        weight = ((Number) weightObj).doubleValue();
+                    }
+                }
+
+                if (crimeName != null && roleName != null && weight != null) {
+                    // Create composite key: "CrimeName|RoleName"
+                    String crimeRoleKey = crimeName + "|" + roleName;
+                    priorities.put(crimeRoleKey, weight);
+                    logger.debug("Loaded priority: '{}' role '{}' = {}", crimeName, roleName, weight);
+                } else {
+                    logger.debug("Skipping invalid priority entry: crime={}, role={}, weight={}",
+                            crimeName, roleName, weightObj);
                 }
             }
+
+            logger.info("✓ Loaded {} crime-role priority combinations from CONFIG database", priorities.size());
+            if (totalEntries > priorities.size()) {
+                logger.warn("Note: {} entries were skipped due to missing values", totalEntries - priorities.size());
+            }
+
         } catch (SQLException e) {
             logger.warn("Could not load role priorities from CONFIG database table crimes_roles_priority: {}",
                     e.getMessage());
             logger.warn("Will use default priority values for role assignment");
+            logger.info("Expected table structure: crimes_roles_priority(crime_name, role_name, weight)");
             // Don't throw - we can still process with default values
         }
 
