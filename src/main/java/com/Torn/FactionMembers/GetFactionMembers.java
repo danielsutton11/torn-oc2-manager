@@ -47,18 +47,23 @@ public class GetFactionMembers {
     public static class FactionInfo {
         private final String factionId;
         private final String dbSuffix;
-        private final String apiKey;
+        private final List<String> apiKeys;
 
-        public FactionInfo(String factionId, String dbPrefix, String apiKey) {
+        public FactionInfo(String factionId, String dbPrefix, List<String> apiKeys) {
             this.factionId = factionId;
             this.dbSuffix = dbPrefix;
-            this.apiKey = apiKey;
+            this.apiKeys = new ArrayList<>(apiKeys);
         }
 
         // Getters
         public String getFactionId() { return factionId; }
         public String getDbSuffix() { return dbSuffix; }
-        public String getApiKey() { return apiKey; }
+        public List<String> getApiKeys() { return apiKeys; }
+
+        // Helper method to get primary API key (first one)
+        public String getPrimaryApiKey() {
+            return apiKeys.isEmpty() ? null : apiKeys.get(0);
+        }
     }
 
     public static class FactionMember {
@@ -189,7 +194,9 @@ public class GetFactionMembers {
      * Fetch crime experience ranks from TornStats API
      */
     private static void fetchCrimeExpRanks(List<FactionMember> factionMembers, FactionInfo factionInfo) {
-        if (factionInfo.getApiKey() == null || factionInfo.getApiKey().trim().isEmpty()) {
+        String apiKey = factionInfo.getPrimaryApiKey();
+
+        if (apiKey == null || apiKey.trim().isEmpty()) {
             logger.warn("No TornStats API key configured for faction {} - using default crime_exp_rank of 100",
                     factionInfo.getFactionId());
             return;
@@ -198,7 +205,7 @@ public class GetFactionMembers {
         try {
             logger.info("Fetching crime experience ranks from TornStats for faction {}", factionInfo.getFactionId());
 
-            String url = "https://www.tornstats.com/api/v2/" + factionInfo.getApiKey() + "/faction/crimes";
+            String url = "https://www.tornstats.com/api/v2/" + apiKey + "/faction/crimes";
 
             Request request = new Request.Builder()
                     .url(url)
@@ -295,9 +302,9 @@ public class GetFactionMembers {
     }
 
     private static List<FactionInfo> getFactionInfo(Connection connection) throws SQLException {
-        List<FactionInfo> factions = new ArrayList<>();
+        Map<String, FactionInfo> factionMap = new HashMap<>();
 
-        String sql = "SELECT DISTINCT ON (f." + Constants.COLUMN_NAME_FACTION_ID + ") " +
+        String sql = "SELECT " +
                 "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
                 "f." + Constants.COLUMN_NAME_DB_SUFFIX + ", " +
                 "ak." + Constants.COLUMN_NAME_API_KEY + " " +
@@ -327,8 +334,17 @@ public class GetFactionMembers {
                     continue;
                 }
 
-                factions.add(new FactionInfo(factionId, dbSuffix, apiKey));
+                // Add to map, collecting multiple API keys per faction
+                factionMap.computeIfAbsent(factionId, k -> new FactionInfo(factionId, dbSuffix, new ArrayList<>()))
+                        .getApiKeys().add(apiKey);
             }
+        }
+
+        List<FactionInfo> factions = new ArrayList<>(factionMap.values());
+
+        // Log API key counts
+        for (FactionInfo faction : factions) {
+            logger.info("Faction {} has {} API key(s)", faction.getFactionId(), faction.getApiKeys().size());
         }
 
         logger.info("Found {} active factions to process", factions.size());
@@ -342,43 +358,77 @@ public class GetFactionMembers {
                 dbSuffix.length() <= 50;
     }
 
-    private static List<FactionMember> fetchFactionMembers(FactionInfo factionInfo) throws IOException {
-        List<FactionMember> members = new ArrayList<>();
-
-        // Construct proper Torn API URL
+    private static List<FactionMember> fetchFactionMembers(FactionInfo factionInfo) throws Exception {
+        List<String> apiKeys = factionInfo.getApiKeys();
         String url = Constants.API_URL_FACTION + "/" + factionInfo.getFactionId() + Constants.API_URL_FACTION_MEMBERS;
 
-        logger.debug("Fetching faction members for faction: {}", factionInfo.getFactionId());
+        logger.debug("Fetching faction members for faction: {} with {} API key(s)",
+                factionInfo.getFactionId(), apiKeys.size());
 
-        // Use the robust API handler instead of direct HTTP call
-        ApiResponse response = TornApiHandler.executeRequest(url, factionInfo.getApiKey());
+        Exception lastException = null;
 
-        // Handle different response types
-        if (response.isSuccess()) {
-            logger.info("Successfully fetched faction members for faction {}", factionInfo.getFactionId());
-            return parseFactionMembers(response.getBody(), factionInfo);
+        // Try each API key until one succeeds
+        for (int i = 0; i < apiKeys.size(); i++) {
+            String apiKey = apiKeys.get(i);
+            logger.debug("Trying API key {} of {} for faction {}", i + 1, apiKeys.size(), factionInfo.getFactionId());
 
-        } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {
-            logger.error("Circuit breaker is open - skipping faction {} to prevent further API failures",
-                    factionInfo.getFactionId());
-            throw new IOException("Circuit breaker open - API calls suspended");
+            try {
+                ApiResponse response = TornApiHandler.executeRequest(url, apiKey);
 
-        } else if (response.isAuthenticationIssue()) {
-            logger.error("API key authentication issue for faction {}: {}",
-                    factionInfo.getFactionId(), response.getErrorMessage());
-            throw new IOException("API key authentication failed: " + response.getErrorMessage());
+                // Handle different response types
+                if (response.isSuccess()) {
+                    logger.info("Successfully fetched faction members for faction {} using API key {} of {}",
+                            factionInfo.getFactionId(), i + 1, apiKeys.size());
+                    return parseFactionMembers(response.getBody(), factionInfo);
 
-        } else if (response.isTemporaryError()) {
-            logger.warn("Temporary API error for faction {} (will retry on next run): {}",
-                    factionInfo.getFactionId(), response.getErrorMessage());
-            throw new IOException("Temporary API error: " + response.getErrorMessage());
+                } else if (response.getType() == ApiResponse.ResponseType.CIRCUIT_BREAKER_OPEN) {
+                    logger.error("Circuit breaker is open - skipping faction {} to prevent further API failures",
+                            factionInfo.getFactionId());
+                    throw new IOException("Circuit breaker open - API calls suspended");
 
+                } else if (response.isAuthenticationIssue()) {
+                    logger.warn("API key {} of {} authentication failed for faction {}: {} - trying next key",
+                            i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
+                    lastException = new IOException("API key authentication failed: " + response.getErrorMessage());
+
+                    // Continue to next API key for authentication issues
+                    continue;
+
+                } else if (response.isTemporaryError()) {
+                    logger.warn("Temporary API error with key {} of {} for faction {}: {} - trying next key",
+                            i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
+                    lastException = new IOException("Temporary API error: " + response.getErrorMessage());
+
+                    // Continue to next API key for temporary errors
+                    continue;
+
+                } else {
+                    logger.warn("Permanent API error with key {} of {} for faction {}: {} - trying next key",
+                            i + 1, apiKeys.size(), factionInfo.getFactionId(), response.getErrorMessage());
+                    lastException = new IOException("API error: " + response.getErrorMessage());
+
+                    // Continue to next API key even for "permanent" errors, as they might be key-specific
+                    continue;
+                }
+
+            } catch (Exception e) {
+                logger.warn("Exception with API key {} of {} for faction {}: {} - trying next key",
+                        i + 1, apiKeys.size(), factionInfo.getFactionId(), e.getMessage());
+                lastException = e instanceof IOException ? (IOException) e : new IOException(e.getMessage(), e);
+                continue;
+            }
+        }
+
+        // All API keys failed
+        logger.error("All {} API key(s) failed for faction {}", apiKeys.size(), factionInfo.getFactionId());
+
+        if (lastException != null) {
+            throw lastException;
         } else {
-            logger.error("Permanent API error for faction {}: {}",
-                    factionInfo.getFactionId(), response.getErrorMessage());
-            throw new IOException("API error: " + response.getErrorMessage());
+            throw new IOException("All API keys failed for faction " + factionInfo.getFactionId());
         }
     }
+
 
     private static List<FactionMember> parseFactionMembers(String responseBody, FactionInfo factionInfo) throws IOException {
         List<FactionMember> members = new ArrayList<>();
