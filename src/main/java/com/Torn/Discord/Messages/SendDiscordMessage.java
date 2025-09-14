@@ -270,7 +270,7 @@ public class SendDiscordMessage {
             // Create Discord payload
             Map<String, Object> payload = new HashMap<>();
 
-            if (!message.trim().isEmpty()) {
+            if (message != null && !message.trim().isEmpty()) {
                 payload.put("content", message.trim());
             }
 
