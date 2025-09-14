@@ -4,11 +4,11 @@ import com.Torn.Execute;
 import com.Torn.Helpers.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
 
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 import com.Torn.Discord.Messages.DiscordMessages;
 
 /**
@@ -443,7 +443,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Hungarian algorithm variant for optimal assignment
+     * Hungarian algorithm variant for optimal assignment with CPR threshold
+     * Now includes minimum CPR requirement of 60 for role assignments
      */
     private static List<MemberSlotAssignment> hungarianAssignment(List<AvailableMember> members,
                                                                   List<AvailableCrimeSlot> slots,
@@ -451,6 +452,9 @@ public class CrimeAssignmentOptimizer {
         List<MemberSlotAssignment> assignments = new ArrayList<>();
         boolean[] memberUsed = new boolean[members.size()];
         boolean[] slotUsed = new boolean[slots.size()];
+
+        // Minimum CPR threshold for role assignment
+        final int MIN_CPR_THRESHOLD = 60;
 
         // Greedy approach: repeatedly find the highest scoring available combination
         while (true) {
@@ -464,6 +468,19 @@ public class CrimeAssignmentOptimizer {
 
                 for (int s = 0; s < slots.size(); s++) {
                     if (slotUsed[s]) continue;
+
+                    // Check CPR threshold before considering this assignment
+                    AvailableMember member = members.get(m);
+                    AvailableCrimeSlot slot = slots.get(s);
+                    Integer memberCPR = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
+
+                    // Skip this assignment if CPR is below threshold
+                    if (memberCPR == null || memberCPR < MIN_CPR_THRESHOLD) {
+                        logger.debug("Skipping assignment: {} to {} ({}) - CPR {} below threshold {}",
+                                member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                                memberCPR != null ? memberCPR : "unknown", MIN_CPR_THRESHOLD);
+                        continue;
+                    }
 
                     if (scoreMatrix[m][s] > bestScore) {
                         bestScore = scoreMatrix[m][s];
@@ -485,8 +502,22 @@ public class CrimeAssignmentOptimizer {
             String reasoning = generateAssignmentReasoning(member, slot, bestScore);
             assignments.add(new MemberSlotAssignment(member, slot, bestScore, reasoning));
 
+            logger.debug("Assigned: {} to {} ({}) with CPR {}",
+                    member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                    member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition()));
+
             memberUsed[bestMember] = true;
             slotUsed[bestSlot] = true;
+        }
+
+        // Log summary of CPR-based filtering
+        int totalSlots = slots.size();
+        int assignedSlots = assignments.size();
+        int unassignedSlots = totalSlots - assignedSlots;
+
+        if (unassignedSlots > 0) {
+            logger.info("CPR filtering results: {} slots assigned, {} slots unassigned due to CPR < {} threshold",
+                    assignedSlots, unassignedSlots, MIN_CPR_THRESHOLD);
         }
 
         return assignments;
@@ -638,18 +669,12 @@ public class CrimeAssignmentOptimizer {
      * Convert database column name back to "CrimeName|SlotName" format
      */
     private static String convertColumnNameToCrimeSlotKey(String columnName) {
-        // This reverses the sanitization done in UpdateMemberCPR
-        // Example: "btb_-_robber" -> "Break the Bank|Robber"
-
         String[] parts = columnName.split("_-_", 2);
         if (parts.length == 2) {
             String crimeAbbrev = parts[0].toUpperCase();
             String slotName = parts[1].replace("_", " ");
 
-            // Convert abbreviation back to full crime name (you might need a lookup table)
-            String crimeName = expandCrimeAbbreviation(crimeAbbrev);
-
-            return crimeName + "|" + capitalizeWords(slotName);
+            return crimeAbbrev + "|" + capitalizeWords(slotName);
         }
 
         return columnName; // Fallback
@@ -658,16 +683,14 @@ public class CrimeAssignmentOptimizer {
     /**
      * Expand crime abbreviation to full name
      */
-    private static String expandCrimeAbbreviation(String abbrev) {
-        // Add mappings for your crime abbreviations
-        Map<String, String> expansions = Map.of(
-                "BTB", "Break the Bank",
-                "BFTP", "Blast from the Past",
-                "SG", "Smash and Grab"
-                // Add more as needed
-        );
-
-        return expansions.getOrDefault(abbrev, abbrev);
+    private static String createCrimeAbbreviation(String crimeName) {
+        if (crimeName == null || crimeName.trim().isEmpty()) {
+            return "UNK";
+        }
+        return Arrays.stream(crimeName.split("\\s+"))
+                .filter(word -> !word.isEmpty())
+                .map(word -> word.substring(0, 1).toUpperCase())
+                .collect(Collectors.joining(""));
     }
 
     /**
@@ -795,58 +818,30 @@ public class CrimeAssignmentOptimizer {
 
     /**
      * Load role priorities from CONFIG database
-     * Now loads crime-specific role priorities using both crime_name and role_name
      */
     private static Map<String, Double> loadRolePrioritiesFromConfig(Connection configConnection) throws SQLException {
         Map<String, Double> priorities = new HashMap<>();
 
-        String prioritiesSql = "SELECT crime_name, role_name, weight FROM crimes_roles_priority";
+        String prioritiesSql = "SELECT role_name, weight FROM crimes_roles_priority";
 
-        logger.debug("Loading crime-specific role priorities with SQL: {}", prioritiesSql);
+        logger.debug("Loading role priorities with SQL: {}", prioritiesSql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(prioritiesSql);
              ResultSet rs = stmt.executeQuery()) {
 
-            int totalEntries = 0;
             while (rs.next()) {
-                totalEntries++;
-                String crimeName = rs.getString("crime_name");
                 String roleName = rs.getString("role_name");
-                // Handle both integer and double weight values
-                Object weightObj = rs.getObject("weight");
-                Double weight = null;
+                Double weight = rs.getObject("weight", Double.class);
 
-                if (weightObj != null) {
-                    if (weightObj instanceof Integer) {
-                        weight = ((Integer) weightObj).doubleValue();
-                    } else if (weightObj instanceof Double) {
-                        weight = (Double) weightObj;
-                    } else if (weightObj instanceof Number) {
-                        weight = ((Number) weightObj).doubleValue();
-                    }
-                }
-
-                if (crimeName != null && roleName != null && weight != null) {
-                    // Create composite key: "CrimeName|RoleName"
-                    String crimeRoleKey = crimeName + "|" + roleName;
-                    priorities.put(crimeRoleKey, weight);
-                    logger.debug("Loaded priority: '{}' role '{}' = {}", crimeName, roleName, weight);
-                } else {
-                    logger.debug("Skipping invalid priority entry: crime={}, role={}, weight={}",
-                            crimeName, roleName, weightObj);
+                if (roleName != null && weight != null) {
+                    priorities.put(roleName, weight);
+                    logger.debug("Loaded role priority: {} = {}", roleName, weight);
                 }
             }
-
-            logger.info("✓ Loaded {} crime-role priority combinations from CONFIG database", priorities.size());
-            if (totalEntries > priorities.size()) {
-                logger.warn("Note: {} entries were skipped due to missing values", totalEntries - priorities.size());
-            }
-
         } catch (SQLException e) {
             logger.warn("Could not load role priorities from CONFIG database table crimes_roles_priority: {}",
                     e.getMessage());
             logger.warn("Will use default priority values for role assignment");
-            logger.info("Expected table structure: crimes_roles_priority(crime_name, role_name, weight)");
             // Don't throw - we can still process with default values
         }
 
@@ -1573,9 +1568,9 @@ public class CrimeAssignmentOptimizer {
         for (String table : configTables) {
             try {
                 verifyTableExists(configConnection, table, "CONFIG");
-                logger.info("      ✓ CONFIG table exists: {}", table);
+                logger.info("      CONFIG table exists: {}", table);
             } catch (SQLException e) {
-                logger.warn("      ✗ CONFIG table missing: {} - {}", table, e.getMessage());
+                logger.warn("      CONFIG table missing: {} - {}", table, e.getMessage());
             }
         }
 
@@ -1583,78 +1578,12 @@ public class CrimeAssignmentOptimizer {
         for (String table : ocDataTables) {
             try {
                 verifyTableExists(ocDataConnection, table, "OC_DATA");
-                logger.info("      ✓ OC_DATA table exists: {}", table);
+                logger.info("      OC_DATA table exists: {}", table);
             } catch (SQLException e) {
-                logger.warn("      ✗ OC_DATA table missing: {} - {}", table, e.getMessage());
+                logger.warn("      OC_DATA table missing: {} - {}", table, e.getMessage());
             }
         }
     }
 
-    /**
-     * Debug method to check specific faction processing
-     */
-    public static void debugSingleFaction(String factionId) throws SQLException {
-        logger.info("==================== SINGLE FACTION DEBUG ====================");
-        logger.info("Debugging faction: {}", factionId);
 
-        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
-        String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
-
-        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
-             Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
-
-            // Find faction info
-            String sql = "SELECT faction_id, db_suffix, oc2_enabled FROM " + Constants.TABLE_NAME_FACTIONS +
-                    " WHERE faction_id = ?";
-
-            try (PreparedStatement stmt = configConnection.prepareStatement(sql)) {
-                stmt.setString(1, factionId);
-
-                try (ResultSet rs = stmt.executeQuery()) {
-                    if (rs.next()) {
-                        String dbSuffix = rs.getString("db_suffix");
-                        boolean oc2Enabled = rs.getBoolean("oc2_enabled");
-
-                        logger.info("Found faction: ID={}, Suffix={}, OC2Enabled={}", factionId, dbSuffix, oc2Enabled);
-
-                        if (!oc2Enabled) {
-                            logger.warn("Faction {} is not OC2 enabled - stopping debug", factionId);
-                            return;
-                        }
-
-                        FactionInfo factionInfo = new FactionInfo(factionId, dbSuffix);
-
-                        // Check tables
-                        checkFactionTables(configConnection, ocDataConnection, factionInfo);
-
-                        // Try to run optimization
-                        logger.info("Attempting optimization for faction {}...", factionId);
-                        OptimizationResult result = optimizeFactionCrimeAssignments(configConnection, ocDataConnection, factionInfo);
-                        logger.info("Optimization result: {}", result);
-
-                        // Try to generate recommendations
-                        logger.info("Attempting to generate recommendations for faction {}...", factionId);
-                        AssignmentRecommendation recommendation = generateAssignmentRecommendations(
-                                configConnection, ocDataConnection, factionInfo);
-                        logger.info("Generated {} assignments", recommendation.getImmediateAssignments().size());
-
-                        // Try to load Discord mappings
-                        logger.info("Attempting to load Discord mappings for faction {}...", factionId);
-                        Map<String, DiscordMemberMapping> mappings = loadDiscordMemberMappings(configConnection, factionInfo);
-                        logger.info("Found {} Discord mappings", mappings.size());
-
-                        // Try to send notification
-                        logger.info("Attempting to send Discord notification for faction {}...", factionId);
-                        boolean success = sendFactionAssignmentNotification(configConnection, ocDataConnection, factionInfo);
-                        logger.info("Discord notification success: {}", success);
-
-                    } else {
-                        logger.warn("Faction {} not found in database", factionId);
-                    }
-                }
-            }
-        }
-
-        logger.info("==================== SINGLE FACTION DEBUG COMPLETE ====================");
-    }
 }
