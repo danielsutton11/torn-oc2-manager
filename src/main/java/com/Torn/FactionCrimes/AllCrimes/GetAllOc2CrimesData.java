@@ -87,14 +87,16 @@ public class GetAllOc2CrimesData {
     public static class OC2ItemData {
         private final String crimeName;
         private final String itemName;
+        private final Long itemId; // Add this field
         private final boolean isReusable;
         private final Integer averagePrice;
         private final boolean shouldBeTransferred;
 
-        public OC2ItemData(String crimeName, String itemName, boolean isReusable,
+        public OC2ItemData(String crimeName, String itemName, Long itemId, boolean isReusable,
                            Integer averagePrice, boolean shouldBeTransferred) {
             this.crimeName = crimeName;
             this.itemName = itemName;
+            this.itemId = itemId;
             this.isReusable = isReusable;
             this.averagePrice = averagePrice;
             this.shouldBeTransferred = shouldBeTransferred;
@@ -102,6 +104,7 @@ public class GetAllOc2CrimesData {
 
         public String getCrimeName() { return crimeName; }
         public String getItemName() { return itemName; }
+        public Long getItemId() { return itemId; } // Add getter
         public boolean isReusable() { return isReusable; }
         public Integer getAveragePrice() { return averagePrice; }
         public boolean shouldBeTransferred() { return shouldBeTransferred; }
@@ -426,9 +429,9 @@ public class GetAllOc2CrimesData {
 
         // CREATE NEW ITEMS TABLE
         String createItemsTableSql = "CREATE TABLE IF NOT EXISTS " + Constants.TABLE_NAME_OC2_ITEMS + " (" +
-                "id SERIAL PRIMARY KEY," +
                 "crime_name VARCHAR(255) NOT NULL," +
                 "item_name VARCHAR(255) NOT NULL," +
+                "item_id BIGINT," +
                 "is_reusable BOOLEAN NOT NULL," +
                 "average_price INTEGER," +
                 "should_be_transferred BOOLEAN NOT NULL DEFAULT FALSE," +
@@ -523,6 +526,7 @@ public class GetAllOc2CrimesData {
                     items.add(new OC2ItemData(
                             crime.getName(),
                             slot.getRequiredItemName(),
+                            slot.getRequiredItemId(),
                             slot.isReusable(),
                             slot.getAveragePrice(),
                             shouldBeTransferred
@@ -551,22 +555,30 @@ public class GetAllOc2CrimesData {
         }
 
         String insertSql = "INSERT INTO " + Constants.TABLE_NAME_OC2_ITEMS + " (" +
-                "crime_name, item_name, is_reusable, average_price, should_be_transferred, last_updated) " +
-                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+                "crime_name, item_name, item_id, is_reusable, average_price, should_be_transferred, last_updated) " +
+                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(insertSql)) {
             for (OC2ItemData item : items) {
                 pstmt.setString(1, item.getCrimeName());
                 pstmt.setString(2, item.getItemName());
-                pstmt.setBoolean(3, item.isReusable());
 
-                if (item.getAveragePrice() != null) {
-                    pstmt.setInt(4, item.getAveragePrice());
+                // Set item ID (can be null if not available)
+                if (item.getItemId() != null) {
+                    pstmt.setLong(3, item.getItemId());
                 } else {
-                    pstmt.setNull(4, Types.INTEGER);
+                    pstmt.setNull(3, Types.BIGINT);
                 }
 
-                pstmt.setBoolean(5, item.shouldBeTransferred());
+                pstmt.setBoolean(4, item.isReusable());
+
+                if (item.getAveragePrice() != null) {
+                    pstmt.setInt(5, item.getAveragePrice());
+                } else {
+                    pstmt.setNull(5, Types.INTEGER);
+                }
+
+                pstmt.setBoolean(6, item.shouldBeTransferred());
                 pstmt.addBatch();
             }
 

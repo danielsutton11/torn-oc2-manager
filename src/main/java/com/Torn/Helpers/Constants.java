@@ -2,13 +2,12 @@ package com.Torn.Helpers;
 
 public class Constants {
 
+    //RAILWAY VARIABLE NAMES
+
+    //JOB CONTROL
     public static final String EXECUTE_JOB = "Execute_Job";
     public static final String EXECUTE = "Execute";
 
-    public static final String PAYMENT_SERVICE_BASE_URL = "PAYMENT_SERVICE_BASE_URL";
-    public static final String SUPPRESS_PROCESSING = "SUPPRESS_PROCESSING";
-
-    //RAILWAY VARIABLE NAMES
     public static final String JOB_RUN_ALL_SETUP_JOBS = "RUN_ALL_SETUP_JOBS";
     public static final String JOB_VALIDATE_API_KEYS = "VALIDATE_KEYS";
     public static final String JOB_GET_FACTION_MEMBERS = "FACTION_MEMBERS";
@@ -22,16 +21,20 @@ public class Constants {
     public static final String JOB_UPDATE_TORNSTATS_CPR = "UPDATE_TORNSTATS_CPR";
     public static final String JOB_VERIFY_PAYMENTS = "VERIFY_PAYMENTS";
 
-    // FIXED: Use consistent naming for all environment variables
     public static final String OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP = "OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP";
     public static final String OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES = "OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES";
     public static final String OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP = "OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP";
     public static final String OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS = "OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS";
 
+    //PAYMENT SERVICE
+    public static final String PAYMENT_SERVICE_BASE_URL = "PAYMENT_SERVICE_BASE_URL";
+    public static final String SUPPRESS_PROCESSING = "SUPPRESS_PROCESSING";
+
+    //POSTGRES
     public static final String DATABASE_URL_CONFIG = "DATABASE_URL_CONFIG";
     public static final String DATABASE_URL_OC_DATA = "DATABASE_URL_OC_DATA";
 
-    //POSTGRES
+    //POSTGRES - Specific
     public static final String POSTGRES_URL = "postgresql://";
     public static final String POSTGRES_JDBC_URL = "jdbc:postgresql://";
 
@@ -51,6 +54,7 @@ public class Constants {
     public static final String TABLE_NAME_OC2_CRIMES = "all_oc2_crimes";
     public static final String TABLE_NAME_OC2_CRIMES_SLOTS = "all_oc2_slots";
     public static final String TABLE_NAME_OC2_ITEMS = "all_oc2_items";
+
     // Global threshold for item transfer (you can adjust this value)
     public static final int ITEM_TRANSFER_THRESHOLD = 1000000;
     public static final String TABLE_NAME_DISCORD_ROLES_WEBHOOKS = "discord_roles_webhooks";
@@ -87,6 +91,7 @@ public class Constants {
     public static final String COMPLETED = "completed";
 
     //TORN API ENDPOINTS & Parameters
+    public static final int TORN_API_RATE_LIMIT_MS = 2000;
     public static final String API_URL_TORN_PARAMETER_JOIN_QUERY = "?";
     public static final String API_URL_TORN_PARAMETER_JOIN_AND = "&";
     public static final String API_URL_TORN_PARAMETER_OFFSET = "offset=";
@@ -147,9 +152,23 @@ public class Constants {
     public static final String NODE_LEVEL = "level";
     public static final String NODE_lAST_ACTION = "last_action";
 
+    public static final String NODE_CRIME_EXP_RANK = "crime_exp_rank";
+
+    public static final String RESPONSE_ERROR = "error";
+    public static final String RESPONSE_STATUS = "status";
+    public static final String RESPONSE_MESSAGE = "message";
+
+    //TORN PAGES
+
+
     //DISCORD
     public static final String DISCORD_BOT_TOKEN = "DISCORD_BOT_TOKEN";
     public static final String DISCORD_GUILD_ID = "DISCORD_GUILD_ID";
+
+    //TORN STATS API ENDPOINTS & Parameters
+    public static final int TORN_STATS_API_RATE_LIMIT_MS = 1000;
+    public static final String API_URL_TORN_STATS = "https://www.tornstats.com/api/v2/";
+    public static final String API_URL_TORN_STATS_FACTION_CRIMES = "/faction/crimes";
 
     //OTHER STATICS
     public static final String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss";

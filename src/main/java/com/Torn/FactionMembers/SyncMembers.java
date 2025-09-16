@@ -36,8 +36,10 @@ public class SyncMembers {
         logger.info("Creating database connection...");
         try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
             logger.info("Database connection established successfully");
-            logger.info("About to call GetFactionMembers...");
+            logger.info("Calling GetFactionMembers...");
+
             GetFactionMembers.fetchAndProcessAllFactionMembers(connection);
+
             logger.info("GetFactionMembers completed successfully");
 
         } catch (Exception e) {

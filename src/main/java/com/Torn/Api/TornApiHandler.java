@@ -105,7 +105,7 @@ public class TornApiHandler {
             }
 
             // If we have more retries left, wait and try again
-            if (attempt <= maxRetries && (response == null || response.shouldRetry())) {
+            if (attempt <= maxRetries && response.shouldRetry()) {
                 logger.info("Retrying API call to {} in {}ms (attempt {}/{})",
                         maskedUrl, retryDelay, attempt, maxRetries + 1);
 
@@ -174,7 +174,7 @@ public class TornApiHandler {
         }
 
         // Other client errors (don't retry)
-        if (statusCode >= 400 && statusCode < 500) {
+        if (statusCode >= 400) {
             logger.error("Client error {} for {}: {}", statusCode, maskedUrl, responseBody);
             return ApiResponse.clientError("Client error: " + statusCode);
         }

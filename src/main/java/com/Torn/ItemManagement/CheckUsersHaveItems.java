@@ -166,7 +166,7 @@ public class CheckUsersHaveItems {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
 
-                if (factionId != null && dbSuffix != null && isValidDbSuffix(dbSuffix)) {
+                if (factionId != null && isValidDbSuffix(dbSuffix)) {
                     factions.add(new FactionInfo(factionId, dbSuffix));
                 } else {
                     logger.warn("Skipping faction with invalid data: factionId={}, dbSuffix={}", factionId, dbSuffix);
@@ -253,7 +253,7 @@ public class CheckUsersHaveItems {
     /**
      * Get users who need non-reusable items they don't have
      */
-    private static List<UserItemRequest> getUsersNeedingItems(Connection ocDataConnection, String tableName) throws SQLException {
+    private static List<UserItemRequest> getUsersNeedingItems(Connection ocDataConnection, String tableName) {
         List<UserItemRequest> itemRequests = new ArrayList<>();
 
         String sql = "SELECT " +
@@ -299,11 +299,34 @@ public class CheckUsersHaveItems {
         return itemRequests;
     }
 
+    private static String getItemIdFromDatabase(Connection configConnection, String itemName) {
+        String sql = "SELECT item_id FROM " + Constants.TABLE_NAME_OC2_ITEMS +
+                " WHERE item_name = ? AND item_id IS NOT NULL LIMIT 1";
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql)) {
+            pstmt.setString(1, itemName);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    long itemId = rs.getLong("item_id");
+                    return String.valueOf(itemId);
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("Could not lookup item ID for '{}': {}", itemName, e.getMessage());
+        }
+
+        return "0"; // Fallback to "0" if not found
+    }
+
     /**
      * Convert internal item requests to Discord message format
      */
     private static List<DiscordMessages.ItemRequest> convertToDiscordRequests(List<UserItemRequest> itemRequests) {
         List<DiscordMessages.ItemRequest> discordRequests = new ArrayList<>();
+
+        // Get database connection for item ID lookup
+        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
 
         for (UserItemRequest request : itemRequests) {
             // Generate a request ID for tracking (using crime ID + user ID)
@@ -311,14 +334,21 @@ public class CheckUsersHaveItems {
                     request.getCrimeId() != null ? request.getCrimeId() : 0,
                     request.getUserId());
 
-            // Note: The amount parameter in ItemRequest constructor isn't used in the Discord message,
-            // so we'll pass 1 as a placeholder. The actual item name and details come from other parameters.
+            // Look up the actual item ID from database
+            String itemId = "0"; // Default fallback
+            if (configDatabaseUrl != null) {
+                try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger)) {
+                    itemId = getItemIdFromDatabase(configConnection, request.getItemRequired());
+                } catch (SQLException e) {
+                    logger.debug("Could not connect to config database for item ID lookup: {}", e.getMessage());
+                }
+            }
+
             DiscordMessages.ItemRequest discordRequest = new DiscordMessages.ItemRequest(
                     request.getUserId(),
                     request.getUsername(),
-                    "0", // itemId - not needed for the Discord message
+                    itemId, // Use looked-up item ID
                     request.getItemRequired(),
-                    1, // amount - placeholder, not used in Discord message
                     requestId
             );
 

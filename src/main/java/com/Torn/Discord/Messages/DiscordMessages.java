@@ -6,7 +6,6 @@ import com.Torn.Discord.Messages.SendDiscordMessage.Colors;
 import com.Torn.Execute;
 import com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer;
 import com.Torn.Helpers.Constants;
-import org.apache.tomcat.util.bcel.Const;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +51,7 @@ public class DiscordMessages {
                 ))
                 .setColor(Colors.BLUE)
                 .addField("__Quick Actions__",
-                        "\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
+                        "\n\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
                                 "Automatically opens Torn payment page\n\n" +
                                 "[**Manual Fulfill**](" + createManualPayUrl(requestId) + ") - " +
                                 "Claim request for manual payment\n\n" +
@@ -60,7 +59,7 @@ public class DiscordMessages {
                                 "Direct link to faction controls",
                         false)
                 .addField("ℹ️ Important Notes",
-                        "\n" + "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
+                        "\n\n" + "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
                                 "• Use **Manual Fulfill** if you prefer to pay manually\n" +
                                 "• Links become invalid once claimed by someone\n" +
                                 "• Unclaimed requests reset after 1 hour.",
@@ -72,9 +71,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.BANKER,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -104,9 +103,9 @@ public class DiscordMessages {
         // Send to bankers with custom username
         return SendDiscordMessage.sendMessageNoRole(
                 factionId,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Payment Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -123,7 +122,7 @@ public class DiscordMessages {
                 ))
                 .setColor(Colors.ORANGE)
                 .addField("__Quick Actions__",
-                        "\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
+                        "\n\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -133,9 +132,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.LEADERSHIP,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -163,9 +162,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.OC_MANAGER,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -191,9 +190,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.OC_MANAGER,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -207,7 +206,7 @@ public class DiscordMessages {
         private final String itemName;
         private final String requestId;
 
-        public ItemRequest(String userId, String username, String itemId, String itemName, int amount, String requestId) {
+        public ItemRequest(String userId, String username, String itemId, String itemName, String requestId) {
             this.userId = userId;
             this.username = username;
             this.itemId = itemId;
@@ -230,7 +229,7 @@ public class DiscordMessages {
         description.append("The following users required the following items to complete their organised crimes:\n\n");
 
         for (ItemRequest request : itemRequests) {
-            description.append(String.format("**%s [%s]** needs %s**\n",
+            description.append(String.format("**%s [%s]** needs %s\n",
                     request.getUsername(),
                     request.getUserId(),
                     request.getItemName()
@@ -252,9 +251,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.ARMOURER,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -311,9 +310,9 @@ public class DiscordMessages {
         return SendDiscordMessage.sendToRole(
                 factionId,
                 RoleType.LEADERSHIP,
-                null, // No additional text message
+                null,
                 embed,
-                "OC2 Manager" // Custom bot name
+                "OC2 Manager"
         );
     }
 
@@ -429,7 +428,7 @@ public class DiscordMessages {
 
         return SendDiscordMessage.sendMessageNoRole(
                 factionInfo.getFactionId(),
-                messageContent, // null if everyone in Discord, OC manager mention if not
+                messageContent,
                 embed,
                 "OC2 Manager"
         );
@@ -490,7 +489,7 @@ public class DiscordMessages {
         }
 
         // Add fulfilled action
-        quickActions.append("✅ **Mark as Fulfilled** (React with ✅)");
+        quickActions.append("\n\n✅ **Mark as Fulfilled** (React with ✅)");
         return quickActions;
     }
 

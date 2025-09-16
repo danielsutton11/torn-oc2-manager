@@ -1,6 +1,8 @@
 package com.Torn;
 
+import com.Torn.FactionMembers.GetFactionMembers;
 import com.Torn.Helpers.Constants;
+import com.Torn.Helpers.FactionInfo;
 import com.Torn.Helpers.TableCleanupUtility;
 import com.Torn.Postgres.Postgres;
 import org.slf4j.Logger;
@@ -12,7 +14,14 @@ import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 
 
 import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static com.Torn.ApiKeys.ValidateApiKeys.Validate;
 import static com.Torn.FactionCrimes.AllCrimes.GetAllOc2CrimesData.fetchAndProcessAllOC2Crimes;
@@ -44,6 +53,7 @@ public class Execute {
 
     private static final Logger logger = LoggerFactory.getLogger(Execute.class);
     public static final Postgres postgres = new Postgres();
+    public static List<FactionInfo> factionInfo = null;
 
     public static void main(String[] args) {
         logger.info("Application starting...");
@@ -71,6 +81,22 @@ public class Execute {
 
     private static void runBatchJob(String jobCode) {
         try {
+
+            String databaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+            if (databaseUrl == null || databaseUrl.isEmpty()) {
+                throw new IllegalStateException("DATABASE_URL_CONFIG environment variable not set");
+            }
+
+            logger.info("Creating database connection...");
+            try (Connection connection = Execute.postgres.connect(databaseUrl, logger)) {
+                logger.info("Database connection established successfully");
+                factionInfo = getFactionInfo(connection);
+                logger.info("Faction Info Load completed successfully");
+            } catch (Exception e) {
+                logger.error("Error in faction info load", e);
+                throw e;
+            }
+
             switch (jobCode) {
                 case Constants.JOB_RUN_ALL_SETUP_JOBS:
                     runAllJobs();
@@ -206,6 +232,63 @@ public class Execute {
         String executeCode = System.getenv(Constants.EXECUTE);
         return "true".equalsIgnoreCase(executeCode);
     }
+
+    private static List<FactionInfo> getFactionInfo(Connection connection) throws SQLException {
+        Map<String,FactionInfo> factionMap = new HashMap<>();
+
+        String sql = "SELECT " +
+                "f." + Constants.COLUMN_NAME_FACTION_ID + ", " +
+                "f." + Constants.COLUMN_NAME_DB_SUFFIX + ", " +
+                "ak." + Constants.COLUMN_NAME_API_KEY + " " +
+                "FROM " + Constants.TABLE_NAME_FACTIONS + " f " +
+                "JOIN " + Constants.TABLE_NAME_API_KEYS + " ak ON f." + Constants.COLUMN_NAME_FACTION_ID + " = ak.faction_id " +
+                "WHERE ak." + Constants.COLUMN_NAME_ACTIVE + " = true " +
+                "ORDER BY f." + Constants.COLUMN_NAME_FACTION_ID + ", ak." + Constants.COLUMN_NAME_API_KEY;
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
+                String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
+                String apiKey = rs.getString(Constants.COLUMN_NAME_API_KEY);
+
+                // Validate data
+                if (factionId == null || dbSuffix == null || apiKey == null) {
+                    logger.warn("Skipping faction with null data: factionId={}, dbSuffix={}, apiKey={}",
+                            factionId, dbSuffix, (apiKey == null ? "null" : "***"));
+                    continue;
+                }
+
+                // Validate dbSuffix for SQL injection prevention
+                if (!isValidDbSuffix(dbSuffix)) {
+                    logger.error("Invalid db_suffix for faction {}: {}", factionId, dbSuffix);
+                    continue;
+                }
+
+                // Add to map, collecting multiple API keys per faction
+                factionMap.computeIfAbsent(factionId, k -> new FactionInfo(factionId, dbSuffix, new ArrayList<>()))
+                        .getApiKeys().add(apiKey);
+            }
+        }
+        List<FactionInfo> factions = new ArrayList<>(factionMap.values());
+
+        // Log API key counts
+        for (FactionInfo faction : factions) {
+            logger.info("Faction {} has {} API key(s)", faction.getFactionId(), faction.getApiKeys().size());
+        }
+
+        logger.info("Found {} active factions to process", factions.size());
+        return factions;
+    }
+
+    private static boolean isValidDbSuffix(String dbSuffix) {
+        return dbSuffix != null &&
+                dbSuffix.matches("^[a-zA-Z][a-zA-Z0-9_]*$") &&
+                !dbSuffix.isEmpty() &&
+                dbSuffix.length() <= 50;
+    }
+
     /**
      * Clean up resources before application exit
      */

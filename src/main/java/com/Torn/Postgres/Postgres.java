@@ -3,13 +3,17 @@ package com.Torn.Postgres;
 import com.Torn.Helpers.Constants;
 import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Postgres {
+
+    private static final Logger logger = LoggerFactory.getLogger(Postgres.class);
 
     // Cache data sources to avoid recreating them
     private static final ConcurrentHashMap<String, HikariDataSource> dataSources = new ConcurrentHashMap<>();
@@ -57,5 +61,14 @@ public class Postgres {
             }
         }
         dataSources.clear();
+    }
+
+    public static void clearExistingData(Connection connection, String tableName) throws SQLException {
+        String sql = "DELETE FROM " + tableName;
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            int deletedRows = pstmt.executeUpdate();
+            logger.debug("Cleared {} existing rows from {}", deletedRows, tableName);
+        }
     }
 }
