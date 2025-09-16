@@ -41,30 +41,28 @@ public class DiscordMessages {
                                                String itemName,
                                                long amount) {
 
+        String profileUrl = String.format("https://www.torn.com/profile.php?id=%s", playerId);
+
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💰 Payment Request #" + requestId)
                 .setDescription(String.format(
-                        "**%s [%s]** needs payment for an OC item they already had:\n\n" +
+                        "[**%s[%s]](%s)** needs payment for an OC item they already had:\n\n" +
                                 "💎 **Item:** %s\n" +
                                 "💵 **Amount:** %s\n",
-                        playerName, playerId, itemName, formatCurrency(amount)
+                        playerName, playerId, profileUrl, itemName, formatCurrency(amount)
                 ))
                 .setColor(Colors.BLUE)
                 .addField("__Quick Actions__",
-                        "\n\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
-                                "Automatically opens Torn payment page\n\n" +
-                                "[**Manual Fulfill**](" + createManualPayUrl(requestId) + ") - " +
-                                "Claim request for manual payment\n\n" +
-                                "[**Torn Payment Page**](https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user) - " +
-                                "Direct link to faction controls",
+                        "[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
+                                "Open Torn payment page - Prefilled\n\n" +
+                                "[**Manually Fulfill**](" + createManualPayUrl(requestId) + ") - " +
+                                "Open Torn payment page - Manual Entry\n\n",
                         false)
                 .addField("ℹ️ Important Notes",
-                        "\n\n" + "• Click **Auto Fulfill** to be redirected to Torn payment page\n" +
-                                "• Use **Manual Fulfill** if you prefer to pay manually\n" +
-                                "• Links become invalid once claimed by someone\n" +
+                          "• Links become invalid once claimed by someone\n" +
                                 "• Unclaimed requests reset after 1 hour.",
                         false)
-                .setFooter("OC2 Payment System • Request expires 1 after being claimed if not paid", null)
+                .setFooter("OC2 Payment System • Expires in 1 hour", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
         // Send to bankers with custom username
