@@ -46,7 +46,7 @@ public class DiscordMessages {
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💰 Payment Request #" + requestId)
                 .setDescription(String.format(
-                        "[**%s[%s]](%s)** needs payment for an OC item they already had:\n\n" +
+                        "**[%s[%s]](%s)** needs payment for an OC item they already had:\n\n" +
                                 "💎 **Item:** %s\n" +
                                 "💵 **Amount:** %s\n",
                         playerName, playerId, profileUrl, itemName, formatCurrency(amount)

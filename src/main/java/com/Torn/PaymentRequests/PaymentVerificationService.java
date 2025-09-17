@@ -138,19 +138,19 @@ public class PaymentVerificationService {
 
                 if (success) {
                     resent++;
-                    logger.info("✓ Resent notification for expired request: {} (user: {}, value: ${})",
-                            request.getRequestId().substring(0, 8) + "...",
+                    logger.info("Resent notification for expired request: {} (user: {}, value: ${})",
+                            request.getRequestId(),
                             request.getUsername(), request.getItemValue());
                 } else {
                     failed++;
-                    logger.error("✗ Failed to resend notification for request: {}",
-                            request.getRequestId().substring(0, 8) + "...");
+                    logger.error("Failed to resend notification for request: {}",
+                            request.getRequestId());
                 }
 
             } catch (Exception e) {
                 failed++;
                 logger.error("Error resending notification for request {}: {}",
-                        request.getRequestId().substring(0, 8) + "...", e.getMessage(), e);
+                        request.getRequestId(), e.getMessage(), e);
             }
         }
 
@@ -375,7 +375,7 @@ public class PaymentVerificationService {
         double variance = Math.abs(actualAmount - expectedAmount) / (double) expectedAmount;
         if (variance > 0.05) { // Allow 5% variance
             logger.debug("Amount mismatch for request {} - expected: ${}, actual: ${}, variance: {:.2%}",
-                    request.getRequestId().substring(0, 8) + "...", expectedAmount, actualAmount, variance);
+                    request.getRequestId(), expectedAmount, actualAmount, variance);
             return false;
         }
 
@@ -384,13 +384,13 @@ public class PaymentVerificationService {
             long claimedTimestamp = request.getClaimedAt().getTime() / 1000; // Convert to seconds
             if (newsTimestamp < claimedTimestamp) {
                 logger.debug("Payment timestamp {} before claim timestamp {} for request {}",
-                        newsTimestamp, claimedTimestamp, request.getRequestId().substring(0, 8) + "...");
+                        newsTimestamp, claimedTimestamp, request.getRequestId());
                 return false;
             }
         }
 
         logger.debug("Payment match found: ${} to {} for request {}",
-                actualAmount, payment.getRecipientName(), request.getRequestId().substring(0, 8) + "...");
+                actualAmount, payment.getRecipientName(), request.getRequestId());
         return true;
     }
 
