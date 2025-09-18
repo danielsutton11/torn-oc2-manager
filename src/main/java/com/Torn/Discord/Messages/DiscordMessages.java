@@ -6,6 +6,7 @@ import com.Torn.Discord.Messages.SendDiscordMessage.Colors;
 import com.Torn.Execute;
 import com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer;
 import com.Torn.Helpers.Constants;
+import com.Torn.Helpers.FactionInfo;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,21 +49,21 @@ public class DiscordMessages {
                 .setDescription(String.format(
                         "**[%s[%s]](%s)** needs payment for an OC item they already had:\n\n" +
                                 "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n",
+                                "💵 **Amount:** %s\n\n",
                         playerName, playerId, profileUrl, itemName, formatCurrency(amount)
                 ))
                 .setColor(Colors.BLUE)
                 .addField("__Quick Actions__",
-                        "[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
-                                "Open Torn payment page - Prefilled\n\n" +
+                        "\n\n\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
+                                "Open Torn payment page - Prefilled\n" +
                                 "[**Manually Fulfill**](" + createManualPayUrl(requestId) + ") - " +
-                                "Open Torn payment page - Manual Entry\n\n",
+                                "Open Torn payment page - Manual Entry\n\n\n",
                         false)
                 .addField("ℹ️ Important Notes",
-                          "• Links become invalid once claimed by someone\n" +
+                          "\n\n\n• Links become invalid once claimed by someone\n" +
                                 "• Unclaimed requests reset after 1 hour.",
                         false)
-                .setFooter("OC2 Payment System • Expires in 1 hour", null)
+                .setFooter("OC2 Payment System • Expires 1 hour after being claimed", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
         // Send to bankers with custom username
@@ -87,7 +88,7 @@ public class DiscordMessages {
                 .setDescription(String.format(
                         "The payment to **%s [%s]** has been fulfilled by %s:\n\n" +
                                 "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n",
+                                "💵 **Amount:** %s\n\n",
                         username, userId,fulfilledBy, itemRequired, formatCurrency(itemValue)
                 ))
                 .addField("Status", "✅ **COMPLETED**", true)
@@ -117,7 +118,7 @@ public class DiscordMessages {
                 ))
                 .setColor(Colors.ORANGE)
                 .addField("__Quick Actions__",
-                        "\n\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
+                        "\n\n\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury&start=0&sub=drugs)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -147,7 +148,7 @@ public class DiscordMessages {
                 ))
                 .setColor(Colors.GREEN)
                 .addField("__Quick Actions__",
-                        "\n\n" + "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                        "\n\n\n" + "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -175,7 +176,7 @@ public class DiscordMessages {
                 )
                 .setColor(Colors.CYAN)
                 .addField("__Quick Actions__",
-                        "\n\n" + "👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                        "\n\n\n 👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -238,7 +239,7 @@ public class DiscordMessages {
                 .setTitle("🔫 OC2 Items Required")
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
-                .addField("__Quick Actions__", "\n\n" + quickActions, false)
+                .addField("__Quick Actions__", "\n\n\n" + quickActions, false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
@@ -295,7 +296,7 @@ public class DiscordMessages {
                 .setDescription(description.toString())
                 .setColor(Colors.PURPLE)
                 .addField("__Quick Actions__",
-                        "\n\n" + "🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury)\n\n" +
+                        "\n\n\n🔫 [**Armoury**](https://www.torn.com/factions.php?step=your#/tab=armoury)\n\n" +
                                 "✅ **Mark as Fulfilled** (React with ✅)",
                         false)
                 .setFooter("OC2 Management System", null)
@@ -350,7 +351,7 @@ public class DiscordMessages {
         }
 
         Map<String, List<CrimeAssignmentOptimizer.MemberSlotAssignment>> assignmentsByCrime = assignments.stream()
-                .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName()));
+                .collect(Collectors.groupingBy(a -> a.getSlot().getCrimeName() + " [" + a.getSlot().getCrimeId() + "]"));
 
         StringBuilder description = new StringBuilder();
         description.append("The following users should join the following crimes, in the specified slots:\n\n");
@@ -427,6 +428,61 @@ public class DiscordMessages {
                 embed,
                 "OC2 Manager"
         );
+    }
+
+    /**
+     * Load existing participants for crimes to help distinguish between identical crime names
+     */
+    private static Map<Long, List<String>> loadExistingCrimeParticipants(Connection ocDataConnection,
+                                                                         FactionInfo factionInfo,
+                                                                         List<CrimeAssignmentOptimizer.MemberSlotAssignment> assignments) throws SQLException {
+        Map<Long, List<String>> participants = new HashMap<>();
+
+        // Get unique crime IDs from assignments
+        Set<Long> crimeIds = assignments.stream()
+                .map(a -> a.getSlot().getCrimeId())
+                .collect(Collectors.toSet());
+
+        if (crimeIds.isEmpty()) {
+            return participants;
+        }
+
+        String crimesTable = "crimes_" + factionInfo.getDbSuffix();
+
+        // Build SQL with IN clause for multiple crime IDs
+        StringBuilder sqlBuilder = new StringBuilder();
+        sqlBuilder.append("SELECT crime_id, slot_position, username FROM ").append(crimesTable)
+                .append(" WHERE crime_id IN (");
+
+        for (int i = 0; i < crimeIds.size(); i++) {
+            if (i > 0) sqlBuilder.append(",");
+            sqlBuilder.append("?");
+        }
+        sqlBuilder.append(") AND username IS NOT NULL ORDER BY crime_id, slot_position");
+
+        try (PreparedStatement stmt = ocDataConnection.prepareStatement(sqlBuilder.toString())) {
+            int paramIndex = 1;
+            for (Long crimeId : crimeIds) {
+                stmt.setLong(paramIndex++, crimeId);
+            }
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Long crimeId = rs.getLong("crime_id");
+                    String slotPosition = rs.getString("slot_position");
+                    String username = rs.getString("username");
+
+                    participants.computeIfAbsent(crimeId, k -> new ArrayList<>())
+                            .add(slotPosition + ": " + username);
+                }
+            }
+        } catch (SQLException e) {
+            logger.warn("Could not load existing crime participants from table {}: {}",
+                    crimesTable, e.getMessage());
+            // Return empty map - not critical for functionality
+        }
+
+        return participants;
     }
 
     /**

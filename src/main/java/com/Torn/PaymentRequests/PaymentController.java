@@ -187,7 +187,7 @@ public class PaymentController {
                 "    <meta charset=\"UTF-8\">\n" +
                 "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
                 "    <title>Payment Request Claimed - OC2 System</title>\n" +
-                "    <meta http-equiv=\"refresh\" content=\"3;url=" + tornPaymentUrl + "\">\n" +
+                "    <meta http-equiv=\"refresh\" content=\"1;url=" + tornPaymentUrl + "\">\n" +
                 "    <style>\n" +
                 "        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f5f5f5; }\n" +
                 "        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }\n" +
@@ -210,12 +210,12 @@ public class PaymentController {
                 "            <strong>Item:</strong> " + request.getItemRequired() + "<br>\n" +
                 "            <strong>Request ID:</strong> " + request.getRequestId() + "\n" + // Show full ID
                 "        </div>\n" +
-                "        <div class=\"countdown\">Redirecting to Torn in <span id=\"countdown\">3</span> seconds...</div>\n" +
+                "        <div class=\"countdown\">Redirecting to Torn in <span id=\"countdown\">1</span> second...</div>\n" +
                 "        <div class=\"manual-link\">\n" +
                 "            <a href=\"" + tornPaymentUrl + "\">Click here if not redirected automatically</a>\n" +
                 "        </div>\n" +
                 "        <script>\n" +
-                "            let seconds = 3;\n" +
+                "            let seconds = 1;\n" +
                 "            const countdown = document.getElementById('countdown');\n" +
                 "            const timer = setInterval(() => {\n" +
                 "                seconds--;\n" +

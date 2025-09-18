@@ -40,7 +40,7 @@ public class PaymentVerificationService {
     // Pattern to extract deposit information from faction news
     // Example: "PlayerName increased PlayerName's money balance by $16,100,000 from $266,198,012 to $282,298,012"
     private static final Pattern DEPOSIT_PATTERN = Pattern.compile(
-            "<a href.*?XID=(\\d+)\">([^<]+)</a> increased <a href.*?XID=\\1\">\\2</a>'s money balance by \\$([\\d,]+)"
+            "<a href.*?XID=(\\d+)\">([^<]+)</a> increased <a href.*?XID=(\\d+)\">([^<]+)</a>'s money balance by \\$([\\d,]+)(?:\\s+from.*?)?"
     );
 
     public static class FactionInfo {
@@ -338,9 +338,11 @@ public class PaymentVerificationService {
             Matcher matcher = DEPOSIT_PATTERN.matcher(newsText);
 
             if (matcher.find()) {
-                String depositorId = matcher.group(1);
-                String depositorName = matcher.group(2);
-                String amountStr = matcher.group(3).replace(",", "");
+                String depositorId = matcher.group(1);        // First XID
+                String depositorName = matcher.group(2);      // First name
+                String recipientId = matcher.group(3);        // Second XID
+                String recipientName = matcher.group(4);      // Second name
+                String amountStr = matcher.group(5).replace(",", ""); // Amount
 
                 long amount = Long.parseLong(amountStr);
 
