@@ -170,12 +170,12 @@ public class FactionItemTracking {
                     if (rowsAffected > 0) {
                         updated = true;
                         logger.info("Updated item tracking: payment request {} marked as fulfilled (table: {})",
-                                paymentRequestId.substring(0, 8) + "...", tableName);
+                                paymentRequestId, tableName);
                     }
                 }
             } catch (SQLException e) {
                 logger.debug("Could not update table {} for payment request {}: {}",
-                        tableName, paymentRequestId.substring(0, 8) + "...", e.getMessage());
+                        tableName, paymentRequestId, e.getMessage());
                 // Continue to next table
             }
         }
