@@ -346,7 +346,7 @@ public class PaymentVerificationService {
 
                 long amount = Long.parseLong(amountStr);
 
-                return new DepositInfo(depositorId, depositorName, amount);
+                return new DepositInfo(recipientId, recipientName, amount, depositorId, depositorName);
             }
 
         } catch (Exception e) {
@@ -360,8 +360,8 @@ public class PaymentVerificationService {
      * Check if a deposit matches a request based on depositor and amount
      */
     private static boolean doesDepositMatchRequest(DepositInfo deposit, PaymentRequest request, long newsTimestamp) {
-        // Check if depositor matches the user who made the request
-        if (!deposit.getDepositorId().equals(request.getUserId())) {
+        // Check if recipient matches the user who made the request
+        if (!deposit.getRecipientId().equals(request.getUserId())) {
             return false;
         }
 
@@ -401,14 +401,22 @@ public class PaymentVerificationService {
     private static class DepositInfo {
         private final String depositorId;
         private final String depositorName;
+        private final String recipientId;
+        private final String recipientName;
         private final long amount;
 
-        public DepositInfo(String depositorId, String depositorName, long amount) {
+        public DepositInfo(String recipientId, String recipientName, long amount, String depositorId, String depositorName) {
+
+            this.recipientId = recipientId;
+            this.recipientName = recipientName;
+            this.amount = amount;
             this.depositorId = depositorId;
             this.depositorName = depositorName;
-            this.amount = amount;
+
         }
 
+        public String getRecipientId() { return recipientId; }
+        public String getRecipientName() { return recipientName; }
         public String getDepositorId() { return depositorId; }
         public String getDepositorName() { return depositorName; }
         public long getAmount() { return amount; }
