@@ -78,20 +78,17 @@ public class DiscordMessages {
     /**
      * send PaymentFulfilled Message
      */
-    public static boolean paymentFulfilled(String factionId,
-                                               String playerName,
-                                               String playerId,
-                                               String requestId,
-                                               String itemName,
-                                               long amount) {
+    public static boolean paymentFulfilled(String factionId, String username, String userId,
+                                           String requestId, String itemRequired, long itemValue,
+                                           String fulfilledBy){
 
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💰 Payment Fulfilled #" + requestId)
                 .setDescription(String.format(
-                        "The payment to **%s [%s]** has been fulfilled:\n\n" +
+                        "The payment to **%s [%s]** has been fulfilled by %s:\n\n" +
                                 "💎 **Item:** %s\n" +
                                 "💵 **Amount:** %s\n",
-                        playerName, playerId, itemName, formatCurrency(amount)
+                        username, userId,fulfilledBy, itemRequired, formatCurrency(itemValue)
                 ))
                 .addField("Status", "✅ **COMPLETED**", true)
                 .setColor(Colors.GREEN)

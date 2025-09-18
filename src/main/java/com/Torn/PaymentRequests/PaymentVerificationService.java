@@ -37,10 +37,10 @@ public class PaymentVerificationService {
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
-    // Pattern to extract payment information from faction news
-    // Example: "PlayerName was given $1,000,000 by GiverName"
-    private static final Pattern PAYMENT_PATTERN = Pattern.compile(
-            "<a href.*?XID=(\\d+)\">([^<]+)</a> was given \\$([\\d,]+) by <a href.*?XID=(\\d+)\">([^<]+)</a>"
+    // Pattern to extract deposit information from faction news
+    // Example: "PlayerName increased PlayerName's money balance by $16,100,000 from $266,198,012 to $282,298,012"
+    private static final Pattern DEPOSIT_PATTERN = Pattern.compile(
+            "<a href.*?XID=(\\d+)\">([^<]+)</a> increased <a href.*?XID=\\1\">\\2</a>'s money balance by \\$([\\d,]+)"
     );
 
     public static class FactionInfo {
@@ -251,8 +251,8 @@ public class PaymentVerificationService {
             logger.debug("Checking {} claimed requests for faction {} ({})",
                     claimedRequests.size(), faction.getFactionId(), faction.getOwnerName());
 
-            // Fetch faction news for giveFunds category
-            String apiUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=giveFunds";
+            // Fetch faction news for depositFunds category
+            String apiUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
             ApiResponse response = TornApiHandler.executeRequest(apiUrl, faction.getApiKey());
 
             if (!response.isSuccess()) {
@@ -278,23 +278,23 @@ public class PaymentVerificationService {
                 String newsText = newsItem.get("text").asText();
                 long timestamp = newsItem.get("timestamp").asLong();
 
-                // Parse payment information from news text
-                PaymentInfo paymentInfo = parsePaymentFromNews(newsText);
+                // Parse deposit information from news text
+                DepositInfo depositInfo = parseDepositFromNews(newsText);
 
-                if (paymentInfo != null) {
-                    // Check if this payment matches any claimed request
+                if (depositInfo != null) {
+                    // Check if this deposit matches any claimed request
                     for (PaymentRequest request : claimedRequests) {
-                        if (doesPaymentMatchRequest(paymentInfo, request, timestamp)) {
+                        if (doesDepositMatchRequest(depositInfo, request, timestamp)) {
                             // Mark request as fulfilled
                             boolean success = PaymentRequestDAO.fulfillPaymentRequest(
                                     connection, request.getRequestId(), "AUTO_VERIFIED", newsId);
 
                             if (success) {
                                 paymentsVerified++;
-                                logger.info("Verified payment for request {} - ${} to {} (news: {})",
+                                logger.info("Verified deposit for request {} - ${} by {} (news: {})",
                                         request.getRequestId(),
-                                        paymentInfo.getAmount(),
-                                        paymentInfo.getRecipientName(),
+                                        depositInfo.getAmount(),
+                                        depositInfo.getDepositorName(),
                                         newsId.substring(0, 8) + "...");
 
                                 boolean notificationSent = DiscordMessages.paymentFulfilled(
@@ -303,7 +303,8 @@ public class PaymentVerificationService {
                                         request.getUserId(),
                                         request.getRequestId(),
                                         request.getItemRequired(),
-                                        request.getItemValue()
+                                        request.getItemValue(),
+                                        depositInfo.getDepositorName()
                                 );
 
                                 if (notificationSent) {
@@ -330,43 +331,41 @@ public class PaymentVerificationService {
     }
 
     /**
-     * Parse payment information from faction news text
+     * Parse deposit information from faction news text
      */
-    private static PaymentInfo parsePaymentFromNews(String newsText) {
+    private static DepositInfo parseDepositFromNews(String newsText) {
         try {
-            Matcher matcher = PAYMENT_PATTERN.matcher(newsText);
+            Matcher matcher = DEPOSIT_PATTERN.matcher(newsText);
 
             if (matcher.find()) {
-                String recipientId = matcher.group(1);
-                String recipientName = matcher.group(2);
+                String depositorId = matcher.group(1);
+                String depositorName = matcher.group(2);
                 String amountStr = matcher.group(3).replace(",", "");
-                String giverId = matcher.group(4);
-                String giverName = matcher.group(5);
 
                 long amount = Long.parseLong(amountStr);
 
-                return new PaymentInfo(recipientId, recipientName, amount, giverId, giverName);
+                return new DepositInfo(depositorId, depositorName, amount);
             }
 
         } catch (Exception e) {
-            logger.debug("Error parsing payment from news text: {}", e.getMessage());
+            logger.debug("Error parsing deposit from news text: {}", e.getMessage());
         }
 
         return null;
     }
 
     /**
-     * Check if a payment matches a request based on recipient and amount
+     * Check if a deposit matches a request based on depositor and amount
      */
-    private static boolean doesPaymentMatchRequest(PaymentInfo payment, PaymentRequest request, long newsTimestamp) {
-        // Check if recipient matches
-        if (!payment.getRecipientId().equals(request.getUserId())) {
+    private static boolean doesDepositMatchRequest(DepositInfo deposit, PaymentRequest request, long newsTimestamp) {
+        // Check if depositor matches the user who made the request
+        if (!deposit.getDepositorId().equals(request.getUserId())) {
             return false;
         }
 
         // Check if amount matches (allow for 5% variance for rounding)
         long expectedAmount = request.getItemValue();
-        long actualAmount = payment.getAmount();
+        long actualAmount = deposit.getAmount();
 
         if (expectedAmount == 0) {
             return false; // Skip zero-value requests
@@ -379,49 +378,43 @@ public class PaymentVerificationService {
             return false;
         }
 
-        // Check if payment occurred after the request was claimed
+        // Check if deposit occurred after the request was claimed
         if (request.getClaimedAt() != null) {
             long claimedTimestamp = request.getClaimedAt().getTime() / 1000; // Convert to seconds
             if (newsTimestamp < claimedTimestamp) {
-                logger.debug("Payment timestamp {} before claim timestamp {} for request {}",
+                logger.debug("Deposit timestamp {} before claim timestamp {} for request {}",
                         newsTimestamp, claimedTimestamp, request.getRequestId());
                 return false;
             }
         }
 
-        logger.debug("Payment match found: ${} to {} for request {}",
-                actualAmount, payment.getRecipientName(), request.getRequestId());
+        logger.debug("Deposit match found: ${} by {} for request {}",
+                actualAmount, deposit.getDepositorName(), request.getRequestId());
         return true;
     }
 
     /**
-     * Helper class to hold payment information parsed from news
+     * Helper class to hold deposit information parsed from news
      */
-    private static class PaymentInfo {
-        private final String recipientId;
-        private final String recipientName;
+    private static class DepositInfo {
+        private final String depositorId;
+        private final String depositorName;
         private final long amount;
-        private final String giverId;
-        private final String giverName;
 
-        public PaymentInfo(String recipientId, String recipientName, long amount, String giverId, String giverName) {
-            this.recipientId = recipientId;
-            this.recipientName = recipientName;
+        public DepositInfo(String depositorId, String depositorName, long amount) {
+            this.depositorId = depositorId;
+            this.depositorName = depositorName;
             this.amount = amount;
-            this.giverId = giverId;
-            this.giverName = giverName;
         }
 
-        public String getRecipientId() { return recipientId; }
-        public String getRecipientName() { return recipientName; }
+        public String getDepositorId() { return depositorId; }
+        public String getDepositorName() { return depositorName; }
         public long getAmount() { return amount; }
-        public String getGiverId() { return giverId; }
-        public String getGiverName() { return giverName; }
 
         @Override
         public String toString() {
-            return String.format("PaymentInfo{%s received $%,d from %s}",
-                    recipientName, amount, giverName);
+            return String.format("DepositInfo{%s deposited $%,d}",
+                    depositorName, amount);
         }
     }
 }
