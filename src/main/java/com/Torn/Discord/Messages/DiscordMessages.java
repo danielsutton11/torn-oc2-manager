@@ -7,6 +7,7 @@ import com.Torn.Execute;
 import com.Torn.FactionCrimes._Algorithms.CrimeAssignmentOptimizer;
 import com.Torn.Helpers.Constants;
 import com.Torn.Helpers.FactionInfo;
+import com.Torn.ItemManagement.CheckUsersHaveItems;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,9 +87,9 @@ public class DiscordMessages {
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("💰 Payment Fulfilled #" + requestId)
                 .setDescription(String.format(
-                        "The payment to **%s [%s]** has been fulfilled by %s:\n\n" +
+                        "The payment to **%s [%s]** has been fulfilled by %s\n\n" +
                                 "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n\n",
+                                "💵 **Amount:** %s\n\n\n",
                         username, userId,fulfilledBy, itemRequired, formatCurrency(itemValue)
                 ))
                 .addField("Status", "✅ **COMPLETED**", true)
@@ -248,6 +249,80 @@ public class DiscordMessages {
                 factionId,
                 RoleType.ARMOURER,
                 null,
+                embed,
+                "OC2 Manager"
+        );
+    }
+
+    /**
+     * Send item transfer requests for high-value reusable items
+     */
+    public static boolean sendItemTransferRequests(String factionId, String itemName,
+                                                   List<CheckUsersHaveItems.ItemTransferRequest> transferRequests,
+                                                   Map<String, String> discordMentions) {
+
+        if (transferRequests.isEmpty()) {
+            return true;
+        }
+
+        // Build dynamic description
+        StringBuilder description = new StringBuilder();
+        description.append("The following users need the following items for their organised crimes. " +
+                "Since these are high-value reusable items, please transfer it between users instead of purchasing new ones:\n\n");
+
+        boolean sendToArmourer = false;
+
+        for (CheckUsersHaveItems.ItemTransferRequest request : transferRequests) {
+
+            // Get Discord mentions if available
+            String fromMention = discordMentions.get(request.getFromUserId());
+            String toMention = discordMentions.get(request.getToUserId());
+
+            // Use mentions if available, otherwise use usernames
+            String fromDisplay = fromMention != null ? fromMention : "**" + request.getFromUsername() + "**";
+            String toDisplay = toMention != null ? toMention : "**" + request.getToUsername() + "**";
+
+            if(fromMention == null || toMention == null) {sendToArmourer = true;}
+
+            description.append(String.format("🔄 %s → %s → %s\n", fromDisplay,request.getItemName(), toDisplay));
+        }
+
+        // Build quick actions
+        String quickActions = "🏪 [**Items**](https://www.torn.com/page.php?sid=ItemMarket) - Go to your items\n\n" +
+                "📤 [**Trade**](https://www.torn.com/trade.php#step=start) - Send items to other users\n";
+
+        DiscordEmbed embed = new DiscordEmbed()
+                .setTitle("🔄 OC2 Item Transfer Required")
+                .setDescription(description.toString())
+                .setColor(Colors.ORANGE)
+                .addField("__Quick Actions__", "\n\n\n" + quickActions, false)
+                .addField("ℹ️ Important Notes",
+                        "\n\n\n• These are high-value reusable items\n" +
+                                "• Please coordinate transfers instead of buying new ones\n",
+                        false)
+                .setFooter("OC2 Management System", null)
+                .setTimestamp(java.time.Instant.now().toString());
+
+        String messageContent = null;
+        try {
+            messageContent = getOCManagerMention(factionId) +
+                    " Some users are not in Discord, please message them directly.";
+        } catch (Exception e) {
+            logger.warn("Could not get OC Manager mention for faction {}: {}",
+                    factionId, e.getMessage());
+            messageContent = "Some users are not in Discord, please message them directly.";
+        }
+
+        // Build message content to mention users
+
+        if (sendToArmourer) {
+            messageContent = String.join("Some users are not in Discord. Please coordinate the item transfers below.");
+        }
+
+        // Send to leadership role (you may want to adjust the role)
+        return SendDiscordMessage.sendMessageNoRole(
+                factionId,
+                messageContent,
                 embed,
                 "OC2 Manager"
         );
@@ -428,61 +503,6 @@ public class DiscordMessages {
                 embed,
                 "OC2 Manager"
         );
-    }
-
-    /**
-     * Load existing participants for crimes to help distinguish between identical crime names
-     */
-    private static Map<Long, List<String>> loadExistingCrimeParticipants(Connection ocDataConnection,
-                                                                         FactionInfo factionInfo,
-                                                                         List<CrimeAssignmentOptimizer.MemberSlotAssignment> assignments) throws SQLException {
-        Map<Long, List<String>> participants = new HashMap<>();
-
-        // Get unique crime IDs from assignments
-        Set<Long> crimeIds = assignments.stream()
-                .map(a -> a.getSlot().getCrimeId())
-                .collect(Collectors.toSet());
-
-        if (crimeIds.isEmpty()) {
-            return participants;
-        }
-
-        String crimesTable = "crimes_" + factionInfo.getDbSuffix();
-
-        // Build SQL with IN clause for multiple crime IDs
-        StringBuilder sqlBuilder = new StringBuilder();
-        sqlBuilder.append("SELECT crime_id, slot_position, username FROM ").append(crimesTable)
-                .append(" WHERE crime_id IN (");
-
-        for (int i = 0; i < crimeIds.size(); i++) {
-            if (i > 0) sqlBuilder.append(",");
-            sqlBuilder.append("?");
-        }
-        sqlBuilder.append(") AND username IS NOT NULL ORDER BY crime_id, slot_position");
-
-        try (PreparedStatement stmt = ocDataConnection.prepareStatement(sqlBuilder.toString())) {
-            int paramIndex = 1;
-            for (Long crimeId : crimeIds) {
-                stmt.setLong(paramIndex++, crimeId);
-            }
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    Long crimeId = rs.getLong("crime_id");
-                    String slotPosition = rs.getString("slot_position");
-                    String username = rs.getString("username");
-
-                    participants.computeIfAbsent(crimeId, k -> new ArrayList<>())
-                            .add(slotPosition + ": " + username);
-                }
-            }
-        } catch (SQLException e) {
-            logger.warn("Could not load existing crime participants from table {}: {}",
-                    crimesTable, e.getMessage());
-            // Return empty map - not critical for functionality
-        }
-
-        return participants;
     }
 
     /**

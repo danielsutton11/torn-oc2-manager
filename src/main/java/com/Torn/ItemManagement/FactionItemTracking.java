@@ -23,6 +23,7 @@ public class FactionItemTracking {
 
     private static final Logger logger = LoggerFactory.getLogger(FactionItemTracking.class);
 
+
     public enum ItemActionType {
         FACTION_PURCHASE,    // Faction needs to buy the item
         MEMBER_PAYMENT       // Faction needs to pay member for item they have
@@ -137,6 +138,41 @@ public class FactionItemTracking {
             pstmt.executeUpdate();
             logger.debug("Logged member payment requirement: {} for user {} in crime {} (request: {})",
                     itemName, username, crimeName, paymentRequestId); // Now shows full 6-digit ID
+        }
+    }
+
+    /**
+     * Log item transfer request between users (for high-value reusable items)
+     */
+    public static void logItemTransferRequest(Connection ocDataConnection, String factionSuffix,
+                                              String fromUserId, String fromUsername,
+                                              String toUserId, String toUsername,
+                                              String crimeName, String itemName, Long itemValue) throws SQLException {
+        String tableName = "item_tracking_" + factionSuffix;
+
+        // Create table if it doesn't exist
+        createItemTrackingTable(ocDataConnection, factionSuffix);
+
+        String insertSql = "INSERT INTO " + tableName + " (" +
+                "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
+                "faction_paid_member, notes, last_updated) " +
+                "VALUES (?, ?, ?, ?, ?, FALSE, NULL, ?, CURRENT_TIMESTAMP)";
+
+        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
+            pstmt.setString(1, crimeName);
+            pstmt.setString(2, toUserId); // The user who needs the item
+            pstmt.setString(3, toUsername);
+            pstmt.setString(4, itemName);
+            if (itemValue != null) {
+                pstmt.setLong(5, itemValue);
+            } else {
+                pstmt.setNull(5, Types.BIGINT);
+            }
+            pstmt.setString(6, "Item requested from " + fromUsername + " [" + fromUserId + "]");
+
+            pstmt.executeUpdate();
+            logger.debug("Logged item transfer request: {} from {} to {} for crime {} (value: ${})",
+                    itemName, fromUsername, toUsername, crimeName, itemValue);
         }
     }
 

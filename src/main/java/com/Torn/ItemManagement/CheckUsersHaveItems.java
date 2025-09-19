@@ -18,6 +18,7 @@ public class CheckUsersHaveItems {
      * ├── CheckUsersHaveItems.java
      * │   ├── Identifies members needing items they don't have
      * │   ├── Sends Discord notifications to faction armourers
+     * │   ├── Handles high-value reusable item transfers between users
      * │   └── Logs faction purchase requirements
      */
 
@@ -44,9 +45,10 @@ public class CheckUsersHaveItems {
         private final String crimeName;
         private final String role;
         private final Integer itemAveragePrice;
+        private final boolean itemIsReusable;
 
         public UserItemRequest(String userId, String username, String itemRequired,
-                               Long crimeId, String crimeName, String role, Integer itemAveragePrice) {
+                               Long crimeId, String crimeName, String role, Integer itemAveragePrice, boolean itemIsReusable) {
             this.userId = userId;
             this.username = username;
             this.itemRequired = itemRequired;
@@ -54,6 +56,7 @@ public class CheckUsersHaveItems {
             this.crimeName = crimeName;
             this.role = role;
             this.itemAveragePrice = itemAveragePrice;
+            this.itemIsReusable = itemIsReusable;
         }
 
         public String getUserId() { return userId; }
@@ -63,6 +66,52 @@ public class CheckUsersHaveItems {
         public String getCrimeName() { return crimeName; }
         public String getRole() { return role; }
         public Integer getItemAveragePrice() { return itemAveragePrice; }
+        public boolean isItemReusable() { return itemIsReusable; }
+    }
+
+    public static class LastItemUser {
+        private final String userId;
+        private final String username;
+        private final String itemName;
+
+        public LastItemUser(String userId, String username, String itemName) {
+            this.userId = userId;
+            this.username = username;
+            this.itemName = itemName;
+        }
+
+        public String getUserId() { return userId; }
+        public String getUsername() { return username; }
+        public String getItemName() { return itemName; }
+    }
+
+    public static class ItemTransferRequest {
+        private final String fromUserId;
+        private final String fromUsername;
+        private final String toUserId;
+        private final String toUsername;
+        private final String itemName;
+        private final String crimeName;
+        private final long itemValue;
+
+        public ItemTransferRequest(String fromUserId, String fromUsername, String toUserId,
+                                   String toUsername, String itemName, String crimeName, long itemValue) {
+            this.fromUserId = fromUserId;
+            this.fromUsername = fromUsername;
+            this.toUserId = toUserId;
+            this.toUsername = toUsername;
+            this.itemName = itemName;
+            this.crimeName = crimeName;
+            this.itemValue = itemValue;
+        }
+
+        public String getFromUserId() { return fromUserId; }
+        public String getFromUsername() { return fromUsername; }
+        public String getToUserId() { return toUserId; }
+        public String getToUsername() { return toUsername; }
+        public String getItemName() { return itemName; }
+        public String getCrimeName() { return crimeName; }
+        public long getItemValue() { return itemValue; }
     }
 
     /**
@@ -102,6 +151,7 @@ public class CheckUsersHaveItems {
             int failedCount = 0;
             int totalItemRequestsFound = 0;
             int notificationsSent = 0;
+            int transferRequestsSent = 0;
 
             for (FactionInfo factionInfo : factions) {
                 try {
@@ -109,16 +159,19 @@ public class CheckUsersHaveItems {
                             factionInfo.getFactionId(), processedCount + 1, factions.size());
 
                     // Check for users who need items
-                    CheckItemsResult result = checkItemsForFaction(ocDataConnection, factionInfo);
+                    CheckItemsResult result = checkItemsForFaction(configConnection, ocDataConnection, factionInfo);
 
                     if (result.isSuccess()) {
-                        logger.info("Successfully processed faction {} - found {} item requests",
-                                factionInfo.getFactionId(), result.getItemRequestsFound());
+                        logger.info("Successfully processed faction {} - found {} item requests, {} transfer requests",
+                                factionInfo.getFactionId(), result.getItemRequestsFound(), result.getTransferRequestsFound());
                         successfulCount++;
                         totalItemRequestsFound += result.getItemRequestsFound();
 
                         if (result.isNotificationSent()) {
                             notificationsSent++;
+                        }
+                        if (result.isTransferNotificationSent()) {
+                            transferRequestsSent++;
                         }
                     } else {
                         logger.error("Failed to check items for faction {}: {}",
@@ -142,6 +195,7 @@ public class CheckUsersHaveItems {
             logger.info("  Failed: {}", failedCount);
             logger.info("  Total item requests found: {}", totalItemRequestsFound);
             logger.info("  Discord notifications sent: {}", notificationsSent);
+            logger.info("  Transfer requests sent: {}", transferRequestsSent);
 
         } catch (SQLException e) {
             logger.error("Database error during user item check", e);
@@ -181,20 +235,58 @@ public class CheckUsersHaveItems {
     /**
      * Check items for a single faction
      */
-    private static CheckItemsResult checkItemsForFaction(Connection ocDataConnection, FactionInfo factionInfo) {
+    private static CheckItemsResult checkItemsForFaction(Connection configConnection, Connection ocDataConnection, FactionInfo factionInfo) {
         try {
             String overviewTableName = Constants.TABLE_NAME_OVERVIEW + factionInfo.getDbSuffix();
 
-            // Get users who need non-reusable items they don't have
-            List<UserItemRequest> itemRequests = getUsersNeedingItems(ocDataConnection, overviewTableName);
+            // Get users who need items they don't have
+            List<UserItemRequest> allItemRequests = getUsersNeedingItems(ocDataConnection, overviewTableName);
 
-            if (itemRequests.isEmpty()) {
+            if (allItemRequests.isEmpty()) {
                 logger.debug("No item requests found for faction {}", factionInfo.getFactionId());
-                return CheckItemsResult.success(0, false);
+                return CheckItemsResult.success(0, 0, false, false);
             }
 
-            // Log faction purchase requirements for items users don't have
-            for (UserItemRequest request : itemRequests) {
+            // Separate high-value reusable items from regular item requests
+            List<UserItemRequest> regularItemRequests = new ArrayList<>();
+            List<ItemTransferRequest> transferRequests = new ArrayList<>();
+
+            for (UserItemRequest request : allItemRequests) {
+                if (request.isItemReusable() &&
+                        request.getItemAveragePrice() != null &&
+                        request.getItemAveragePrice() > Constants.ITEM_TRANSFER_THRESHOLD) {
+
+                    // High-value reusable item - check for potential transfer
+                    LastItemUser lastUser = getLastUserWithItem(ocDataConnection, factionInfo.getDbSuffix(), request.getItemRequired());
+
+                    if (lastUser != null && !isUserCurrentlyUsingItem(ocDataConnection, overviewTableName, lastUser.getUserId(), request.getItemRequired())) {
+                        // Create transfer request
+                        transferRequests.add(new ItemTransferRequest(
+                                lastUser.getUserId(),
+                                lastUser.getUsername(),
+                                request.getUserId(),
+                                request.getUsername(),
+                                request.getItemRequired(),
+                                request.getCrimeName(),
+                                request.getItemAveragePrice().longValue()
+                        ));
+
+                        logger.info("Created transfer request: {} should send {} to {} for crime {}",
+                                lastUser.getUsername(), request.getItemRequired(), request.getUsername(), request.getCrimeName());
+                    } else {
+                        // No available user to transfer from, treat as regular request
+                        regularItemRequests.add(request);
+                        logger.debug("No available transfer for high-value item {}, adding to regular requests", request.getItemRequired());
+                    }
+                } else {
+                    // Regular item request (non-reusable or below threshold)
+                    regularItemRequests.add(request);
+                }
+            }
+
+            // Log faction purchase requirements for regular items only
+            // High-value reusable items are logged separately in logItemTransferRequest()
+            for (UserItemRequest request : regularItemRequests) {
                 try {
                     // Check if we should suppress tracking during setup
                     String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
@@ -219,29 +311,25 @@ public class CheckUsersHaveItems {
                 }
             }
 
-            logger.info("Found {} users needing items for faction {}", itemRequests.size(), factionInfo.getFactionId());
+            logger.info("Found {} regular item requests and {} transfer requests for faction {}",
+                    regularItemRequests.size(), transferRequests.size(), factionInfo.getFactionId());
 
-            // Log item requests for debugging
-            for (UserItemRequest request : itemRequests) {
-                logger.debug("Item request: {} needs {} for crime {} (role: {}, value: ${})",
-                        request.getUsername(), request.getItemRequired(), request.getCrimeName(),
-                        request.getRole(), request.getItemAveragePrice());
+            // Send notifications
+            boolean regularNotificationSent = false;
+            boolean transferNotificationSent = false;
+
+            // Send regular item requests to armourer
+            if (!regularItemRequests.isEmpty()) {
+                List<DiscordMessages.ItemRequest> discordRequests = convertToDiscordRequests(configConnection, regularItemRequests);
+                regularNotificationSent = sendDiscordNotification(factionInfo.getFactionId(), discordRequests);
             }
 
-            // Convert to Discord message format
-            List<DiscordMessages.ItemRequest> discordRequests = convertToDiscordRequests(itemRequests);
-
-            // Send Discord notification
-            boolean notificationSent = sendDiscordNotification(factionInfo.getFactionId(), discordRequests);
-
-            if (notificationSent) {
-                logger.info("Discord notification sent for faction {} with {} item requests",
-                        factionInfo.getFactionId(), itemRequests.size());
-            } else {
-                logger.warn("✗ Failed to send Discord notification for faction {}", factionInfo.getFactionId());
+            // Send transfer requests
+            if (!transferRequests.isEmpty()) {
+                transferNotificationSent = sendTransferNotifications(factionInfo.getFactionId(), transferRequests);
             }
 
-            return CheckItemsResult.success(itemRequests.size(), notificationSent);
+            return CheckItemsResult.success(regularItemRequests.size(), transferRequests.size(), regularNotificationSent, transferNotificationSent);
 
         } catch (Exception e) {
             logger.error("Exception checking items for faction {}: {}",
@@ -251,7 +339,7 @@ public class CheckUsersHaveItems {
     }
 
     /**
-     * Get users who need non-reusable items they don't have
+     * Get users who need items they don't have (including reusable items)
      */
     private static List<UserItemRequest> getUsersNeedingItems(Connection ocDataConnection, String tableName) {
         List<UserItemRequest> itemRequests = new ArrayList<>();
@@ -263,10 +351,10 @@ public class CheckUsersHaveItems {
                 Constants.COLUMN_NAME_CRIME_ID + ", " +
                 Constants.COLUMN_NAME_CRIME_NAME + ", " +
                 Constants.COLUMN_NAME_ROLE + ", " +
-                Constants.COLUMN_NAME_ITEM_AVERAGE_PRICE + " " +
+                Constants.COLUMN_NAME_ITEM_AVERAGE_PRICE + ", " +
+                Constants.COLUMN_NAME_ITEM_IS_REUSABLE + " " +
                 "FROM " + tableName + " " +
                 "WHERE " + Constants.COLUMN_NAME_ITEM_REQUIRED + " IS NOT NULL " +
-                "AND " + Constants.COLUMN_NAME_ITEM_IS_REUSABLE + " = false " +
                 "AND " + Constants.COLUMN_NAME_USER_HAS_ITEM + " = false " +
                 "AND " + Constants.COLUMN_NAME_IN_ORGANISED_CRIME + " = true " +
                 "ORDER BY " + Constants.COLUMN_NAME_CRIME_ID + ", " + Constants.COLUMN_NAME_USER_NAME;
@@ -282,10 +370,11 @@ public class CheckUsersHaveItems {
                 String crimeName = rs.getString(Constants.COLUMN_NAME_CRIME_NAME);
                 String role = rs.getString(Constants.COLUMN_NAME_ROLE);
                 Integer itemAveragePrice = rs.getObject(Constants.COLUMN_NAME_ITEM_AVERAGE_PRICE, Integer.class);
+                boolean itemIsReusable = rs.getBoolean(Constants.COLUMN_NAME_ITEM_IS_REUSABLE);
 
                 if (userId != null && username != null && itemRequired != null) {
                     itemRequests.add(new UserItemRequest(
-                            userId, username, itemRequired, crimeId, crimeName, role, itemAveragePrice
+                            userId, username, itemRequired, crimeId, crimeName, role, itemAveragePrice, itemIsReusable
                     ));
                 }
             }
@@ -297,6 +386,223 @@ public class CheckUsersHaveItems {
         }
 
         return itemRequests;
+    }
+
+    /**
+     * Get the last user who needed a specific item from the tracking table
+     */
+    private static LastItemUser getLastUserWithItem(Connection ocDataConnection, String dbSuffix, String itemName) {
+        String trackingTableName = "item_tracking_" + dbSuffix;
+
+        String sql = "SELECT user_id, username, item_name " +
+                "FROM " + trackingTableName + " " +
+                "WHERE item_name = ? AND faction_purchased = true " +
+                "ORDER BY log_date DESC " +
+                "LIMIT 1";
+
+        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql)) {
+            pstmt.setString(1, itemName);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String userId = rs.getString("user_id");
+                    String username = rs.getString("username");
+                    String returnedItemName = rs.getString("item_name");
+
+                    logger.debug("Found last user {} ({}) who had item {}", username, userId, itemName);
+                    return new LastItemUser(userId, username, returnedItemName);
+                }
+            }
+
+        } catch (SQLException e) {
+            logger.debug("Could not query tracking table {} for item {}: {}", trackingTableName, itemName, e.getMessage());
+        }
+
+        logger.debug("No previous user found for item {} in tracking table {}", itemName, trackingTableName);
+        return null;
+    }
+
+    /**
+     * Check if a user is currently in a crime that requires the specified item
+     */
+    private static boolean isUserCurrentlyUsingItem(Connection ocDataConnection, String overviewTableName, String userId, String itemName) {
+        String sql = "SELECT COUNT(*) as count " +
+                "FROM " + overviewTableName + " " +
+                "WHERE " + Constants.COLUMN_NAME_USER_ID + " = ? " +
+                "AND " + Constants.COLUMN_NAME_ITEM_REQUIRED + " = ? " +
+                "AND " + Constants.COLUMN_NAME_IN_ORGANISED_CRIME + " = true";
+
+        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql)) {
+            pstmt.setString(1, userId);
+            pstmt.setString(2, itemName);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    int count = rs.getInt("count");
+                    boolean isUsing = count > 0;
+                    logger.debug("User {} is {} using item {}", userId, isUsing ? "currently" : "not currently", itemName);
+                    return isUsing;
+                }
+            }
+
+        } catch (SQLException e) {
+            logger.warn("Could not check if user {} is using item {}: {}", userId, itemName, e.getMessage());
+            // Default to true (assume user is using it) to be safe
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Send transfer notifications for high-value reusable items
+     */
+    private static boolean sendTransferNotifications(String factionId, List<ItemTransferRequest> transferRequests) {
+        if (transferRequests.isEmpty()) {
+            return true;
+        }
+
+        try {
+            // Get database connection for Discord mappings and item tracking
+            String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
+            String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
+
+            if (configDatabaseUrl == null || ocDataDatabaseUrl == null) {
+                logger.error("Database URLs not configured for transfer notifications");
+                return false;
+            }
+
+            try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
+                 Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
+
+                // Get faction suffix for this factionId
+                String factionSuffix = getFactionSuffix(configConnection, factionId);
+                if (factionSuffix == null) {
+                    logger.error("Could not find faction suffix for faction {}", factionId);
+                    return false;
+                }
+
+                // Get Discord mappings for both sender and receiver
+                Map<String, String> discordMentions = getDiscordMentions(configConnection, factionSuffix, transferRequests);
+
+                // Group transfer requests by item to avoid spam
+                Map<String, List<ItemTransferRequest>> requestsByItem = new HashMap<>();
+                for (ItemTransferRequest request : transferRequests) {
+                    requestsByItem.computeIfAbsent(request.getItemName(), k -> new ArrayList<>()).add(request);
+                }
+
+                boolean allSuccessful = true;
+
+                for (Map.Entry<String, List<ItemTransferRequest>> entry : requestsByItem.entrySet()) {
+                    String itemName = entry.getKey();
+                    List<ItemTransferRequest> requests = entry.getValue();
+
+                    // Update item tracking for each transfer request
+                    for (ItemTransferRequest request : requests) {
+                        try {
+                            FactionItemTracking.logItemTransferRequest(
+                                    ocDataConnection,
+                                    factionSuffix,
+                                    request.getFromUserId(),
+                                    request.getFromUsername(),
+                                    request.getToUserId(),
+                                    request.getToUsername(),
+                                    request.getCrimeName(),
+                                    request.getItemName(),
+                                    request.getItemValue()
+                            );
+                        } catch (Exception e) {
+                            logger.warn("Failed to log transfer request for item {}: {}",
+                                    itemName, e.getMessage());
+                        }
+                    }
+
+                    boolean success = DiscordMessages.sendItemTransferRequests(factionId, itemName, requests, discordMentions);
+                    if (!success) {
+                        allSuccessful = false;
+                        logger.error("Failed to send transfer notification for item {} in faction {}", itemName, factionId);
+                    }
+                }
+
+                return allSuccessful;
+            }
+
+        } catch (Exception e) {
+            logger.error("Exception sending transfer notifications for faction {}: {}", factionId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Get faction suffix from faction ID
+     */
+    private static String getFactionSuffix(Connection configConnection, String factionId) {
+        String sql = "SELECT " + Constants.COLUMN_NAME_DB_SUFFIX + " FROM " + Constants.TABLE_NAME_FACTIONS +
+                " WHERE " + Constants.COLUMN_NAME_FACTION_ID + " = ?";
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql)) {
+            pstmt.setString(1, factionId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
+                }
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to get faction suffix for faction {}: {}", factionId, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Get Discord mentions for users involved in transfer requests
+     */
+    private static Map<String, String> getDiscordMentions(Connection configConnection, String factionSuffix,
+                                                          List<ItemTransferRequest> transferRequests) {
+        Map<String, String> mentions = new HashMap<>();
+
+        // Collect all user IDs
+        Set<String> userIds = new HashSet<>();
+        for (ItemTransferRequest request : transferRequests) {
+            userIds.add(request.getFromUserId());
+            userIds.add(request.getToUserId());
+        }
+
+        if (userIds.isEmpty()) {
+            return mentions;
+        }
+
+        String membersTable = "members_" + factionSuffix;
+        StringBuilder sql = new StringBuilder("SELECT user_id, user_discord_mention_id FROM ")
+                .append(membersTable)
+                .append(" WHERE user_id IN (");
+
+        for (int i = 0; i < userIds.size(); i++) {
+            if (i > 0) sql.append(",");
+            sql.append("?");
+        }
+        sql.append(") AND user_discord_mention_id IS NOT NULL");
+
+        try (PreparedStatement pstmt = configConnection.prepareStatement(sql.toString())) {
+            int index = 1;
+            for (String userId : userIds) {
+                pstmt.setString(index++, userId);
+            }
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    String userId = rs.getString("user_id");
+                    String mention = rs.getString("user_discord_mention_id");
+                    if (userId != null && mention != null) {
+                        mentions.put(userId, mention);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to get Discord mentions from table {}: {}", membersTable, e.getMessage());
+        }
+
+        logger.debug("Loaded {} Discord mentions for transfer notifications", mentions.size());
+        return mentions;
     }
 
     private static String getItemIdFromDatabase(Connection configConnection, String itemName) {
@@ -322,11 +628,8 @@ public class CheckUsersHaveItems {
     /**
      * Convert internal item requests to Discord message format
      */
-    private static List<DiscordMessages.ItemRequest> convertToDiscordRequests(List<UserItemRequest> itemRequests) {
+    private static List<DiscordMessages.ItemRequest> convertToDiscordRequests(Connection configConnection, List<UserItemRequest> itemRequests) {
         List<DiscordMessages.ItemRequest> discordRequests = new ArrayList<>();
-
-        // Get database connection for item ID lookup
-        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
 
         for (UserItemRequest request : itemRequests) {
             // Generate a request ID for tracking (using crime ID + user ID)
@@ -335,14 +638,7 @@ public class CheckUsersHaveItems {
                     request.getUserId());
 
             // Look up the actual item ID from database
-            String itemId = "0"; // Default fallback
-            if (configDatabaseUrl != null) {
-                try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger)) {
-                    itemId = getItemIdFromDatabase(configConnection, request.getItemRequired());
-                } catch (SQLException e) {
-                    logger.debug("Could not connect to config database for item ID lookup: {}", e.getMessage());
-                }
-            }
+            String itemId = getItemIdFromDatabase(configConnection, request.getItemRequired());
 
             DiscordMessages.ItemRequest discordRequest = new DiscordMessages.ItemRequest(
                     request.getUserId(),
@@ -403,27 +699,36 @@ public class CheckUsersHaveItems {
     private static class CheckItemsResult {
         private final boolean success;
         private final int itemRequestsFound;
+        private final int transferRequestsFound;
         private final boolean notificationSent;
+        private final boolean transferNotificationSent;
         private final String errorMessage;
 
-        private CheckItemsResult(boolean success, int itemRequestsFound, boolean notificationSent, String errorMessage) {
+        private CheckItemsResult(boolean success, int itemRequestsFound, int transferRequestsFound,
+                                 boolean notificationSent, boolean transferNotificationSent, String errorMessage) {
             this.success = success;
             this.itemRequestsFound = itemRequestsFound;
+            this.transferRequestsFound = transferRequestsFound;
             this.notificationSent = notificationSent;
+            this.transferNotificationSent = transferNotificationSent;
             this.errorMessage = errorMessage;
         }
 
-        public static CheckItemsResult success(int itemRequestsFound, boolean notificationSent) {
-            return new CheckItemsResult(true, itemRequestsFound, notificationSent, null);
+        public static CheckItemsResult success(int itemRequestsFound, int transferRequestsFound,
+                                               boolean notificationSent, boolean transferNotificationSent) {
+            return new CheckItemsResult(true, itemRequestsFound, transferRequestsFound,
+                    notificationSent, transferNotificationSent, null);
         }
 
         public static CheckItemsResult failure(String errorMessage) {
-            return new CheckItemsResult(false, 0, false, errorMessage);
+            return new CheckItemsResult(false, 0, 0, false, false, errorMessage);
         }
 
         public boolean isSuccess() { return success; }
         public int getItemRequestsFound() { return itemRequestsFound; }
+        public int getTransferRequestsFound() { return transferRequestsFound; }
         public boolean isNotificationSent() { return notificationSent; }
+        public boolean isTransferNotificationSent() { return transferNotificationSent; }
         public String getErrorMessage() { return errorMessage; }
     }
 }
