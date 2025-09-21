@@ -1,6 +1,7 @@
 package com.Torn.FactionCrimes._Algorithms;
 
 import com.Torn.Execute;
+import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,7 +71,7 @@ import static com.Torn.Discord.Messages.DiscordMessages.sendNeedCrimesToSpawnFor
 
 public class CrimeAssignmentOptimizer {
 
-    private static final Logger logger = LoggerFactory.getLogger(CrimeAssignmentOptimizer.class);
+    private static final Logger logger = GetAvailableCrimes.logger;
 
     // Weighting factors for the optimization algorithm
     private static final double CPR_WEIGHT = 0.3;           // 30% - Member's CPR for the slot

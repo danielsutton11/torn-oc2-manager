@@ -39,7 +39,7 @@ public class GetAvailableCrimes {
      * │   └── Triggers notifications when more crimes needed
      */
 
-    private static final Logger logger = LoggerFactory.getLogger(GetAvailableCrimes.class);
+    public static final Logger logger = LoggerFactory.getLogger(GetAvailableCrimes.class);
     private static final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 

@@ -23,7 +23,7 @@ public class GetAvailableMembers {
      * │   └── Stores in faction-specific available members tables
      */
 
-    private static final Logger logger = LoggerFactory.getLogger(GetAvailableMembers.class);
+    private static final Logger logger = GetAvailableCrimes.logger;
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final int TORN_API_RATE_LIMIT_MS = 2000;
 
