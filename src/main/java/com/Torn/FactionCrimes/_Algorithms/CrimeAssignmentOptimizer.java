@@ -1794,13 +1794,11 @@ public class CrimeAssignmentOptimizer {
                 .collect(Collectors.toList());
 
         if (!urgentCompletions.isEmpty()) {
-            recommendations.add(String.format("🔥 URGENT: %d crimes are nearly complete (75%+ filled) - prioritize these for immediate returns",
-                    urgentCompletions.size()));
+            recommendations.add("URGENT: " + urgentCompletions.size() + " crimes are nearly complete (75%+ filled) - prioritize these for immediate returns");
         }
 
         if (!nearCompletions.isEmpty()) {
-            recommendations.add(String.format("⚡ Focus on %d active crimes (50%+ filled) for efficient completion",
-                    nearCompletions.size()));
+            recommendations.add("Focus on " + nearCompletions.size() + " active crimes (50%+ filled) for efficient completion");
         }
 
         // High-value crime recommendations
@@ -1823,7 +1821,7 @@ public class CrimeAssignmentOptimizer {
                     result.getUnassignedMembers(), result.getUnfilledSlots()));
 
             if (result.getUnassignedMembers() >= 3) {
-                recommendations.add("⚠️ Significant number of unassigned members - crime spawning notification has been sent");
+                recommendations.add("⚠Significant number of unassigned members - crime spawning notification has been sent");
             }
         }
 
