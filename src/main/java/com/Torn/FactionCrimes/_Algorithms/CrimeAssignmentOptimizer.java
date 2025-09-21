@@ -27,6 +27,7 @@ import com.Torn.Discord.Messages.DiscordMessages;
  └── Load Discord Mappings (from CONFIG)
  └── Match member IDs to Discord usernames for notifications
 
+ └── Prioritise crimes with few slots remaining
  For each available slot:
  ├── Find members with CPR >= 60 for that specific crime-role
  ├── Score each member-slot combination based on:

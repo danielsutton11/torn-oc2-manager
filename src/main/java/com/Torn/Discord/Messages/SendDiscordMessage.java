@@ -293,6 +293,8 @@ public class SendDiscordMessage {
                 payload.put("username", "TornBot OC Manager");
             }
 
+            payload.put("avatar_url", "https://www.shutterstock.com/image-photo/dangerous-criminal-scary-hooded-man-600nw-2143206117.jpg");
+
             return sendDiscordWebhook(payload, config.getWebhookUrl());
 
         } catch (Exception e) {
