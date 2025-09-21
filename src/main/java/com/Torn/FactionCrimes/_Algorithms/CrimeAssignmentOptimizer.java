@@ -397,7 +397,7 @@ public class CrimeAssignmentOptimizer {
             logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
             logger.info("  Successful: {}", successfulCount);
             logger.info("  Failed: {}", failedCount);
-            logger.info("  Success rate: %.1f%", processedCount > 0 ? (successfulCount * 100.0 / processedCount) : 0.0);
+            logger.info("  Success rate: {}%", String.format("%.1f", processedCount > 0 ? (successfulCount * 100.0 / processedCount) : 0.0));
 
         } catch (SQLException e) {
             logger.error("CRITICAL: Database error during crime assignment optimization", e);
@@ -751,14 +751,14 @@ public class CrimeAssignmentOptimizer {
 
         // ADD THIS DEBUG LOGGING HERE:
         if (memberCPR != null && memberCPR >= 60) { // Only log for members that should qualify
-            logger.debug("SCORE DEBUG: {} -> {} - CPR:{} CompletionPriority:%.2f FinalScore:%.3f (cpr:%.3f value:%.3f priority:%.3f completion:%.3f)",
+            logger.debug("SCORE DEBUG: {} -> {} - CPR:{} CompletionPriority:{} FinalScore:{} (cpr:{} value:{} priority:{} completion:{})",
                     member.getUsername(), slot.getCrimeName(), memberCPR, slot.getCompletionPriority(),
                     totalScore, cprScore, valueScore, priorityScore, completionScore);
         }
 
         // Log reasoning for high-priority assignments
         if (slot.getCompletionPriority() > 2.0 && logger.isDebugEnabled()) {
-            logger.debug("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: %.2f",
+            logger.debug("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: {}",
                     member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
                     slot.getCompletionStatus(), slot.getCompletionPriority());
         }
@@ -827,7 +827,7 @@ public class CrimeAssignmentOptimizer {
 
         logger.info("ASSIGNMENT SUMMARY:");
         logger.info("  Total slots: {}", totalSlots);
-        logger.info("  Assigned slots: {} (%.1f%)", assignedSlots, (assignedSlots * 100.0 / totalSlots));
+        logger.info("  Assigned slots: {} ({}%)", assignedSlots, String.format("%.1f", (assignedSlots * 100.0 / totalSlots)));
         logger.info("  Pass 1 (CPR >= {}): {}", MIN_CPR_THRESHOLD, pass1Assignments);
         logger.info("  Pass 2 (Exp Rank): {}", assignedSlots - pass1Assignments);
         logger.info("  Unassigned slots: {}", unassignedSlots);
@@ -908,7 +908,7 @@ public class CrimeAssignmentOptimizer {
                             bestSlot = s;
 
                             // ADD THIS DEBUG LOGGING HERE:
-                            logger.debug("NEW BEST (Pass1): {} -> {} - CPR:{} Score:%.3f CompletionPriority:%.2f",
+                            logger.debug("NEW BEST (Pass1): {} -> {} - CPR:{} Score:{} CompletionPriority:{}",
                                     member.getUsername(), slot.getCrimeName(), memberCPR, bestScore, slot.getCompletionPriority());
                         }
                     } else {
@@ -942,9 +942,9 @@ public class CrimeAssignmentOptimizer {
             if (bestMember == -1) {
                 logger.info("ASSIGNMENT PASS DEBUG: No valid member found for any slot in pass {}", useCprFilter ? 1 : 2);
             } else if (bestScore < 0.1) {
-                logger.info("ASSIGNMENT PASS DEBUG: Best score %.3f below threshold 0.1 in pass {}", bestScore, useCprFilter ? 1 : 2);
+                logger.info("ASSIGNMENT PASS DEBUG: Best score {} below threshold 0.1 in pass {}", bestScore, useCprFilter ? 1 : 2);
             } else {
-                logger.debug("ASSIGNMENT PASS DEBUG: Found assignment {} -> {} with score %.3f",
+                logger.debug("ASSIGNMENT PASS DEBUG: Found assignment {} -> {} with score {}",
                         members.get(bestMember).getUsername(), slots.get(bestSlot).getCrimeName(), bestScore);
             }
 
@@ -1381,14 +1381,14 @@ public class CrimeAssignmentOptimizer {
 
                 // ADD THIS DEBUG LOGGING HERE:
                 if (rowCount <= 10) { // Log first 10 entries instead of 5 for more data
-                    logger.info("DEBUG SLOT {}: {} - {} ({}) - Total:{} Available:{} Filled:{} CompletionPriority:%.2f ExpectedValue:{}",
+                    logger.info("DEBUG SLOT {}: {} - {} ({}) - Total:{} Available:{} Filled:{} CompletionPriority:{} ExpectedValue:{}",
                             rowCount, slot.getCrimeName(), slot.getSlotPosition(), slot.getSlotPositionId(),
                             slot.getTotalSlots(), slot.getAvailableSlots(), slot.getFilledSlots(),
                             slot.getCompletionPriority(), slot.getExpectedValue());
                 }
 
                 if (rowCount <= 5) { // Log first few entries for debugging
-                    logger.debug("  Slot {}: {} - {} ({}) - Completion: {}, Priority: %.2f",
+                    logger.debug("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {}",
                             rowCount, slot.getCrimeName(), slot.getSlotPosition(),
                             slot.getCompletionStatus(), slot.getCompletionPriority());
                 }
@@ -1433,7 +1433,7 @@ public class CrimeAssignmentOptimizer {
                                             stats.getAverageCompletionRatio() >= 0.25 ? "📈 MEDIUM" :
                                                     stats.getAverageCompletionRatio() > 0 ? "🟡 STARTED" : "🆕 NEW";
 
-                            logger.info("    {} {}: avg %.0f% complete, {} available slots across {} crimes",
+                            logger.info("    {} {}: avg {}% complete, {} available slots across {} crimes",
                                     priorityLevel, crimeName, stats.getAverageCompletionRatio() * 100,
                                     availableSlots, stats.getCrimeCount());
 
@@ -1939,7 +1939,7 @@ public class CrimeAssignmentOptimizer {
             logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
             logger.info("  Successful notifications: {}", successfulNotifications);
             logger.info("  Failed notifications: {}", failedNotifications);
-            logger.info("  Success rate: %.1f%", processedCount > 0 ? (successfulNotifications * 100.0 / processedCount) : 0.0);
+            logger.info("  Success rate: {}%", String.format("%.1f", processedCount > 0 ? (successfulNotifications * 100.0 / processedCount) : 0.0));
 
         } catch (SQLException e) {
             logger.error("CRITICAL: Database error during Discord assignment notifications", e);
