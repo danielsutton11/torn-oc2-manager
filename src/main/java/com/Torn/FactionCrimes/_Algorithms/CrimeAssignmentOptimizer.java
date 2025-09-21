@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.util.*;
 import com.Torn.Discord.Messages.DiscordMessages;
 
+import static com.Torn.Discord.Messages.DiscordMessages.sendNeedCrimesToSpawnForAvailableMembers;
+
 /**
  * Algorithmic optimizer for assigning available members to available crime slots
  * based on CPR, crime value, and slot priority
@@ -437,8 +439,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Optimize crime assignments for a single faction using advanced algorithms
-     * Enhanced with comprehensive debugging
+     * Enhanced optimizeFactionCrimeAssignments method to handle unassigned members
+     * Add this after the existing optimization logic
      */
     private static OptimizationResult optimizeFactionCrimeAssignments(Connection configConnection,
                                                                       Connection ocDataConnection,
@@ -469,7 +471,12 @@ public class CrimeAssignmentOptimizer {
                 logger.info("EARLY EXIT: Faction {} has no available members (all busy or none exist)", factionInfo.getFactionId());
                 return new OptimizationResult(new ArrayList<>(), 0.0, availableSlots.size(), 0);
             } else if (availableSlots.isEmpty()) {
-                logger.info("EARLY EXIT: Faction {} has no available crime slots", factionInfo.getFactionId());
+                logger.info("EARLY EXIT: Faction {} has no available crime slots but has {} available members",
+                        factionInfo.getFactionId(), availableMembers.size());
+
+                // NEW: Handle case where there are available members but no crime slots
+                handleUnassignedMembers(configConnection, factionInfo, availableMembers);
+
                 return new OptimizationResult(new ArrayList<>(), 0.0, 0, availableMembers.size());
             }
 
@@ -490,6 +497,19 @@ public class CrimeAssignmentOptimizer {
 
             logger.info("STEP 3 RESULT: Optimization completed for faction {} - {}", factionInfo.getFactionId(), result);
 
+            // NEW: Check for unassigned members after optimization
+            if (result.getUnassignedMembers() > 0) {
+                logger.info("STEP 4: Found {} unassigned members for faction {} - checking for crime spawning need",
+                        result.getUnassignedMembers(), factionInfo.getFactionId());
+
+                // Get the list of unassigned members
+                List<AvailableMember> unassignedMembers = getUnassignedMembers(availableMembers, result.getAssignments());
+
+                if (!unassignedMembers.isEmpty()) {
+                    handleUnassignedMembers(configConnection, factionInfo, unassignedMembers);
+                }
+            }
+
             return result;
 
         } catch (SQLException e) {
@@ -502,6 +522,136 @@ public class CrimeAssignmentOptimizer {
             throw new SQLException("Optimization failed for faction " + factionInfo.getFactionId(), e);
         }
     }
+
+    /**
+     * Handle unassigned members by notifying about crime spawning needs
+     */
+    private static void handleUnassignedMembers(Connection configConnection,
+                                                FactionInfo factionInfo,
+                                                List<AvailableMember> unassignedMembers) {
+        try {
+            logger.info("UNASSIGNED MEMBERS: Faction {} has {} members who could not be assigned to crimes",
+                    factionInfo.getFactionId(), unassignedMembers.size());
+
+            // Log details about unassigned members for debugging
+            if (logger.isDebugEnabled()) {
+                logger.debug("Unassigned members for faction {}:", factionInfo.getFactionId());
+                unassignedMembers.forEach(member ->
+                        logger.debug("  - {} (ExpRank: {}, CPR entries: {})",
+                                member.getUsername(), member.getCrimeExpRank(), member.getCrimeSlotCPR().size())
+                );
+            }
+
+            // Call the method to send crime spawning notification
+            logger.info("NOTIFICATION: Sending 'need crimes to spawn' notification for faction {} with {} unassigned members",
+                    factionInfo.getFactionId(), unassignedMembers.size());
+
+            sendNeedCrimesToSpawnForAvailableMembers(configConnection, factionInfo, unassignedMembers);
+
+            logger.info("✓ Successfully sent crime spawning notification for faction {}", factionInfo.getFactionId());
+
+        } catch (Exception e) {
+            logger.error("ERROR: Failed to handle unassigned members for faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+            // Don't throw - this is supplementary functionality, main optimization should continue
+        }
+    }
+
+    /**
+     * Get list of members who were not assigned in the optimization result
+     */
+    private static List<AvailableMember> getUnassignedMembers(List<AvailableMember> allMembers,
+                                                              List<MemberSlotAssignment> assignments) {
+        // Get set of assigned member user IDs
+        Set<String> assignedMemberIds = assignments.stream()
+                .map(assignment -> assignment.getMember().getUserId())
+                .collect(Collectors.toSet());
+
+        // Return members who are not in the assigned set
+        return allMembers.stream()
+                .filter(member -> !assignedMemberIds.contains(member.getUserId()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Send notification about needing to spawn more crimes for available members
+     * Uses the existing sendNeedCrimesToSpawnForAvailableMembers method
+     */
+    private static void sendNeedCrimesToSpawnForAvailableMembers(Connection configConnection,
+                                                                 FactionInfo factionInfo,
+                                                                 List<AvailableMember> unassignedMembers) {
+        try {
+            logger.info("=== CRIME SPAWNING NOTIFICATION ===");
+            logger.info("Faction {} needs more crimes spawned for {} available members",
+                    factionInfo.getFactionId(), unassignedMembers.size());
+
+            // Create summary of unassigned members by experience level for logging
+            Map<String, List<AvailableMember>> membersByExperience = categorizeUnassignedMembers(unassignedMembers);
+
+            // Log member categories for debugging
+            membersByExperience.forEach((category, members) -> {
+                logger.info("  {}: {} members", category, members.size());
+                if (logger.isDebugEnabled()) {
+                    members.forEach(member -> logger.debug("    - {} (ExpRank: {})",
+                            member.getUsername(), member.getCrimeExpRank()));
+                }
+            });
+
+            // Call the existing Discord notification method
+            logger.info("Sending Discord crime spawning notification for faction {}", factionInfo.getFactionId());
+
+            // Note: The existing method signature is sendNeedCrimesToSpawnForAvailableMembers(String factionId)
+            // Import the class containing this method (likely DiscordMessages or similar)
+            boolean success = DiscordMessages.sendNeedCrimesToSpawnForAvailableMembers(factionInfo.getFactionId());
+
+            if (success) {
+                logger.info("✓ Successfully sent crime spawning Discord notification for faction {}",
+                        factionInfo.getFactionId());
+            } else {
+                logger.warn("✗ Failed to send crime spawning Discord notification for faction {}",
+                        factionInfo.getFactionId());
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to send crime spawning notification for faction {}: {}",
+                    factionInfo.getFactionId(), e.getMessage(), e);
+            // Don't throw - this is supplementary functionality, main optimization should continue
+        }
+    }
+
+    /**
+     * Categorize unassigned members by their experience/capability level
+     */
+    private static Map<String, List<AvailableMember>> categorizeUnassignedMembers(List<AvailableMember> unassignedMembers) {
+        Map<String, List<AvailableMember>> categories = new LinkedHashMap<>();
+
+        // Initialize categories
+        categories.put("Elite (Rank 1-10)", new ArrayList<>());
+        categories.put("Experienced (Rank 11-30)", new ArrayList<>());
+        categories.put("Capable (Rank 31-60)", new ArrayList<>());
+        categories.put("Developing (Rank 61+)", new ArrayList<>());
+
+        // Categorize members based on crime experience ranking
+        for (AvailableMember member : unassignedMembers) {
+            int rank = member.getCrimeExpRank();
+
+            if (rank <= 10) {
+                categories.get("Elite (Rank 1-10)").add(member);
+            } else if (rank <= 30) {
+                categories.get("Experienced (Rank 11-30)").add(member);
+            } else if (rank <= 60) {
+                categories.get("Capable (Rank 31-60)").add(member);
+            } else {
+                categories.get("Developing (Rank 61+)").add(member);
+            }
+        }
+
+        // Remove empty categories
+        categories.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+
+        return categories;
+    }
+
 
     /**
      * Core optimization algorithm using weighted scoring and Hungarian-like assignment
@@ -1573,8 +1723,7 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Enhanced strategic recommendations to mention completion prioritization
-     * Add this to your generateStrategicRecommendations method
+     * Enhanced generateStrategicRecommendations to include unassigned member info
      */
     private static List<String> generateStrategicRecommendations(OptimizationResult result, FactionInfo factionInfo) {
         List<String> recommendations = new ArrayList<>();
@@ -1614,11 +1763,17 @@ public class CrimeAssignmentOptimizer {
                     highValueAssignments.size(), highValueThreshold / 1_000_000));
         }
 
-        // Resource efficiency
+        // Resource efficiency and unassigned member recommendations
         if (result.getUnfilledSlots() > result.getUnassignedMembers()) {
             recommendations.add("More crime slots available than members - consider recruitment");
         } else if (result.getUnassignedMembers() > result.getUnfilledSlots()) {
-            recommendations.add("More members than slots - consider spawning additional crimes");
+            // NEW: Enhanced recommendation for unassigned members
+            recommendations.add(String.format("More members (%d) than available slots (%d) - consider spawning additional crimes",
+                    result.getUnassignedMembers(), result.getUnfilledSlots()));
+
+            if (result.getUnassignedMembers() >= 3) {
+                recommendations.add("⚠️ Significant number of unassigned members - crime spawning notification has been sent");
+            }
         }
 
         return recommendations;

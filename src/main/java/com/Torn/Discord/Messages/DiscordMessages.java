@@ -194,6 +194,34 @@ public class DiscordMessages {
     }
 
     /**
+     * Send need more crimes spawned
+     */
+    public static boolean sendNeedCrimesToSpawnForAvailableMembers(String factionId) {
+
+        DiscordEmbed embed = new DiscordEmbed()
+                .setTitle("🚨 OC2 Crimes Needed")
+                .setDescription(
+                        "There are members available for crimes, but no suitable crimes, please review and spawn some easier crimes!\n"
+                )
+                .setColor(Colors.CYAN)
+                .addField("__Quick Actions__",
+                        "\n\n\n 👮 [**Organised Crimes**](https://www.torn.com/factions.php?step=your&type=1#/tab=crimes)\n\n" +
+                                "✅ **Mark as Fulfilled** (React with ✅)",
+                        false)
+                .setFooter("OC2 Management System", null)
+                .setTimestamp(java.time.Instant.now().toString());
+
+        // Send to OC Manager
+        return SendDiscordMessage.sendToRole(
+                factionId,
+                RoleType.OC_MANAGER,
+                null,
+                embed,
+                "OC2 Manager"
+        );
+    }
+
+    /**
      * Send a users required OC items
      */
     public static class ItemRequest {
