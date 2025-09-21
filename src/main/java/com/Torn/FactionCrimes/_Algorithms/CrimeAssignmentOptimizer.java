@@ -1586,7 +1586,7 @@ public class CrimeAssignmentOptimizer {
 
                 logger.debug("Found faction record {}: ID={}, Suffix={}", totalFactions, factionId, dbSuffix);
 
-                if (factionId != null && dbSuffix != null && isValidDbSuffix(dbSuffix)) {
+                if (factionId != null && isValidDbSuffix(dbSuffix)) {
                     factions.add(new FactionInfo(factionId, dbSuffix));
                     validFactions++;
                     logger.info("✓ Added valid faction {} with suffix {} to processing list", factionId, dbSuffix);
