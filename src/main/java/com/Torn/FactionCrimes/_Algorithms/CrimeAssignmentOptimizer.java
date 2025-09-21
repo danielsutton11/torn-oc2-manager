@@ -415,7 +415,7 @@ public class CrimeAssignmentOptimizer {
 
         String sql = "SELECT crime_name, total_slots FROM all_oc_crimes";
 
-        logger.debug("Loading crime total slots from CONFIG database: {}", sql);
+        logger.info("Loading crime total slots from CONFIG database: {}", sql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -426,7 +426,7 @@ public class CrimeAssignmentOptimizer {
 
                 if (crimeName != null && totalSlots != null) {
                     crimeTotalSlots.put(crimeName, totalSlots);
-                    logger.debug("Loaded total slots for {}: {}", crimeName, totalSlots);
+                    logger.info("Loaded total slots for {}: {}", crimeName, totalSlots);
                 }
             }
 
@@ -486,13 +486,11 @@ public class CrimeAssignmentOptimizer {
                     availableMembers.size(), availableSlots.size(), factionInfo.getFactionId());
 
             // Log sample data for debugging
-            if (logger.isDebugEnabled()) {
-                logger.debug("Sample available members for faction {}:", factionInfo.getFactionId());
-                availableMembers.stream().limit(3).forEach(member -> logger.debug("  {}", member));
+            logger.info("Sample available members for faction {}:", factionInfo.getFactionId());
+            availableMembers.stream().limit(3).forEach(member -> logger.info("  {}", member));
 
-                logger.debug("Sample available slots for faction {}:", factionInfo.getFactionId());
-                availableSlots.stream().limit(3).forEach(slot -> logger.debug("  {}", slot));
-            }
+            logger.info("Sample available slots for faction {}:", factionInfo.getFactionId());
+            availableSlots.stream().limit(3).forEach(slot -> logger.info("  {}", slot));
 
             logger.info("PRE-OPTIMIZATION DEBUG for faction {}:", factionInfo.getFactionId());
             logger.info("  Members with CPR >= 60: {}",
@@ -543,13 +541,13 @@ public class CrimeAssignmentOptimizer {
                     factionInfo.getFactionId(), unassignedMembers.size());
 
             // Log details about unassigned members for debugging
-            if (logger.isDebugEnabled()) {
-                logger.debug("Unassigned members for faction {}:", factionInfo.getFactionId());
-                unassignedMembers.forEach(member ->
-                        logger.debug("  - {} (ExpRank: {}, CPR entries: {})",
-                                member.getUsername(), member.getCrimeExpRank(), member.getCrimeSlotCPR().size())
-                );
-            }
+
+            logger.info("Unassigned members for faction {}:", factionInfo.getFactionId());
+            unassignedMembers.forEach(member ->
+                    logger.info("  - {} (ExpRank: {}, CPR entries: {})",
+                            member.getUsername(), member.getCrimeExpRank(), member.getCrimeSlotCPR().size())
+            );
+
 
             // Call the method to send crime spawning notification
             logger.info("NOTIFICATION: Sending 'need crimes to spawn' notification for faction {} with {} unassigned members",
@@ -600,10 +598,9 @@ public class CrimeAssignmentOptimizer {
             // Log member categories for debugging
             membersByExperience.forEach((category, members) -> {
                 logger.info("  {}: {} members", category, members.size());
-                if (logger.isDebugEnabled()) {
-                    members.forEach(member -> logger.debug("    - {} (ExpRank: {})",
+                    members.forEach(member -> logger.info("    - {} (ExpRank: {})",
                             member.getUsername(), member.getCrimeExpRank()));
-                }
+
             });
 
             // Call the existing Discord notification method
@@ -669,7 +666,7 @@ public class CrimeAssignmentOptimizer {
                                                           List<AvailableCrimeSlot> slots,
                                                           int totalFactionMembers) {
 
-        logger.debug("Running optimization algorithm with {} members and {} slots", members.size(), slots.size());
+        logger.info("Running optimization algorithm with {} members and {} slots", members.size(), slots.size());
 
         // Create scoring matrix
         double[][] scoreMatrix = createScoringMatrix(members, slots);
@@ -685,7 +682,7 @@ public class CrimeAssignmentOptimizer {
         // Sort assignments by score (highest first)
         assignments.sort((a, b) -> Double.compare(b.getOptimizationScore(), a.getOptimizationScore()));
 
-        logger.debug("Optimization algorithm completed: {} assignments, total score: %.3f",
+        logger.info("Optimization algorithm completed: {} assignments, total score: %.3f",
                 assignments.size(), totalScore);
 
         return new OptimizationResult(assignments, totalScore, unfilledSlots, unassignedMembers);
@@ -749,16 +746,17 @@ public class CrimeAssignmentOptimizer {
         // Normalize back to 100% by dividing by 1.25
         totalScore = totalScore / 1.25;
 
-        // ADD THIS DEBUG LOGGING HERE:
         if (memberCPR != null && memberCPR >= 60) { // Only log for members that should qualify
-            logger.debug("SCORE DEBUG: {} -> {} - CPR:{} CompletionPriority:{} FinalScore:{} (cpr:{} value:{} priority:{} completion:{})",
-                    member.getUsername(), slot.getCrimeName(), memberCPR, slot.getCompletionPriority(),
-                    totalScore, cprScore, valueScore, priorityScore, completionScore);
+            logger.info("DETAILED SCORE: {} -> {} ({}) - CPR:{} CompPri:{} | Scores: cpr:{} value:{} priority:{} activity:{} expRank:{} completion:{} | FINAL:{}",
+                    member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                    memberCPR, slot.getCompletionPriority(),
+                    cprScore, valueScore, priorityScore, activityScore,
+                    crimeExpScore, completionScore, totalScore);
         }
 
         // Log reasoning for high-priority assignments
-        if (slot.getCompletionPriority() > 2.0 && logger.isDebugEnabled()) {
-            logger.debug("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: {}",
+        if (slot.getCompletionPriority() > 2.0) {
+            logger.info("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: {}",
                     member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
                     slot.getCompletionStatus(), slot.getCompletionPriority());
         }
@@ -848,7 +846,7 @@ public class CrimeAssignmentOptimizer {
                 return rs.getInt(1);
             }
         } catch (SQLException e) {
-            logger.debug("Could not get total member count from table {}: {}", membersTable, e.getMessage());
+            logger.info("Could not get total member count from table {}: {}", membersTable, e.getMessage());
         }
 
         return 100; // Default fallback
@@ -907,9 +905,8 @@ public class CrimeAssignmentOptimizer {
                             bestMember = m;
                             bestSlot = s;
 
-                            // ADD THIS DEBUG LOGGING HERE:
-                            logger.debug("NEW BEST (Pass1): {} -> {} - CPR:{} Score:{} CompletionPriority:{}",
-                                    member.getUsername(), slot.getCrimeName(), memberCPR, bestScore, slot.getCompletionPriority());
+                            logger.info("NEW BEST (Pass1): {} -> {} - CPR:{} Score:{} CompletionPriority:{} ExpectedValue:${}M",
+                                    member.getUsername(), slot.getCrimeName(), memberCPR, bestScore, slot.getCompletionPriority(), slot.getExpectedValue() / 1_000_000);
                         }
                     } else {
                         // Pass 2: Skip if CPR is above threshold (already handled in pass 1)
@@ -920,7 +917,7 @@ public class CrimeAssignmentOptimizer {
                         // NEW: For high-difficulty crimes (7+), only allow top 25% members
                         if (slot.getCrimeDifficulty() != null && slot.getCrimeDifficulty() >= 7) {
                             if (!isInTop25Percent(member, totalFactionMembers)) {
-                                logger.debug("Skipping member {} for high-difficulty crime {} (difficulty {}): not in top 25% (rank {} of {})",
+                                logger.info("Skipping member {} for high-difficulty crime {} (difficulty {}): not in top 25% (rank {} of {})",
                                         member.getUsername(), slot.getCrimeName(), slot.getCrimeDifficulty(),
                                         member.getCrimeExpRank(), totalFactionMembers);
                                 continue;
@@ -944,7 +941,7 @@ public class CrimeAssignmentOptimizer {
             } else if (bestScore < 0.1) {
                 logger.info("ASSIGNMENT PASS DEBUG: Best score {} below threshold 0.1 in pass {}", bestScore, useCprFilter ? 1 : 2);
             } else {
-                logger.debug("ASSIGNMENT PASS DEBUG: Found assignment {} -> {} with score {}",
+                logger.info("ASSIGNMENT PASS DEBUG: Found assignment {} -> {} with score {}",
                         members.get(bestMember).getUsername(), slots.get(bestSlot).getCrimeName(), bestScore);
             }
 
@@ -961,8 +958,13 @@ public class CrimeAssignmentOptimizer {
             String reasoning = generateAssignmentReasoning(member, slot, bestScore, useCprFilter);
             assignments.add(new MemberSlotAssignment(member, slot, bestScore, reasoning));
 
+            logger.info("FINAL ASSIGNMENT: {} -> {} ({}) | CPR:{} Score:{} CompletionPri:{} ExpectedValue:${}M | {}",
+                    member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                    memberCPR != null ? memberCPR : "N/A", bestScore,
+                    slot.getCompletionPriority(), slot.getExpectedValue() / 1_000_000, reasoning);
+
             String assignmentType = useCprFilter ? "CPR-based" : "Exp Rank fallback";
-            logger.debug("Assigned ({}): {} to {} ({}) - CPR: {}, ExpRank: {}",
+            logger.info("Assigned ({}): {} to {} ({}) - CPR: {}, ExpRank: {}",
                     assignmentType, member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
                     memberCPR != null ? memberCPR : "N/A", member.getCrimeExpRank());
 
@@ -1118,7 +1120,7 @@ public class CrimeAssignmentOptimizer {
         String membersSql = "SELECT user_id, username, last_joined_crime_date FROM " + availableMembersTable +
                 " WHERE is_in_oc = false ORDER BY username";
 
-        logger.debug("Executing SQL: {}", membersSql);
+        logger.info("Executing SQL: {}", membersSql);
 
         try (PreparedStatement membersStmt = ocDataConnection.prepareStatement(membersSql);
              ResultSet membersRs = membersStmt.executeQuery()) {
@@ -1130,15 +1132,15 @@ public class CrimeAssignmentOptimizer {
                 String username = membersRs.getString("username");
                 Timestamp lastJoinedCrimeDate = membersRs.getTimestamp("last_joined_crime_date");
 
-                logger.debug("Loading member {}: {} ({})", memberCount, username, userId);
+                logger.info("Loading member {}: {} ({})", memberCount, username, userId);
 
                 // Load CPR data for this member
                 Map<String, Integer> cprData = loadMemberCPRData(ocDataConnection, cprTable, userId);
-                logger.debug("  Loaded {} CPR entries for member {}", cprData.size(), username);
+                logger.info("  Loaded {} CPR entries for member {}", cprData.size(), username);
 
                 // Load crime experience rank from CONFIG database
                 int crimeExpRank = loadMemberCrimeExpRank(configConnection, membersTable, userId);
-                logger.debug("  Crime experience rank for member {}: {}", username, crimeExpRank);
+                logger.info("  Crime experience rank for member {}: {}", username, crimeExpRank);
 
                 members.add(new AvailableMember(userId, username, cprData, lastJoinedCrimeDate, crimeExpRank));
             }
@@ -1178,7 +1180,7 @@ public class CrimeAssignmentOptimizer {
                 }
             }
         } catch (SQLException e) {
-            logger.debug("Could not load crime exp rank for user {} from table {}: {}",
+            logger.info("Could not load crime exp rank for user {} from table {}: {}",
                     userId, membersTable, e.getMessage());
         }
 
@@ -1218,14 +1220,17 @@ public class CrimeAssignmentOptimizer {
                             // Convert column name back to "CrimeName|SlotName" format
                             String crimeSlotKey = convertColumnNameToCrimeSlotKey(columnName);
                             cprData.put(crimeSlotKey, cprValue);
+                            if (cprValue >= 60) { // Only log meaningful CPR scores
+                                logger.info("CPR DATA: {} has {} CPR for {}", userId, cprValue, crimeSlotKey);
+                            }
                         }
                     }
                 } else {
-                    logger.debug("No CPR data found for user {} in table {}", userId, cprTable);
+                    logger.info("No CPR data found for user {} in table {}", userId, cprTable);
                 }
             }
         } catch (SQLException e) {
-            logger.debug("Could not load CPR data for user {} from table {}: {}",
+            logger.info("Could not load CPR data for user {} from table {}: {}",
                     userId, cprTable, e.getMessage());
             // Don't throw - member can still be processed without CPR data
         }
@@ -1309,7 +1314,7 @@ public class CrimeAssignmentOptimizer {
         Map<Long, Integer> crimeAvailableSlotCounts = new HashMap<>();
         Map<Long, String> crimeNames = new HashMap<>();
 
-        logger.debug("Counting available slots per crime: {}", countSql);
+        logger.info("Counting available slots per crime: {}", countSql);
 
         try (PreparedStatement countStmt = ocDataConnection.prepareStatement(countSql);
              ResultSet countRs = countStmt.executeQuery()) {
@@ -1336,7 +1341,7 @@ public class CrimeAssignmentOptimizer {
                 "ORDER BY crime_id, slot_position_id";
 
 
-        logger.debug("Loading individual slots: {}", slotsSql);
+        logger.info("Loading individual slots: {}", slotsSql);
 
         try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql);
              ResultSet slotsRs = slotsStmt.executeQuery()) {
@@ -1388,7 +1393,7 @@ public class CrimeAssignmentOptimizer {
                 }
 
                 if (rowCount <= 5) { // Log first few entries for debugging
-                    logger.debug("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {}",
+                    logger.info("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {}",
                             rowCount, slot.getCrimeName(), slot.getSlotPosition(),
                             slot.getCompletionStatus(), slot.getCompletionPriority());
                 }
@@ -1496,7 +1501,7 @@ public class CrimeAssignmentOptimizer {
 
         String prioritiesSql = "SELECT role_name, weight FROM crimes_roles_priority";
 
-        logger.debug("Loading role priorities with SQL: {}", prioritiesSql);
+        logger.info("Loading role priorities with SQL: {}", prioritiesSql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(prioritiesSql);
              ResultSet rs = stmt.executeQuery()) {
@@ -1507,7 +1512,7 @@ public class CrimeAssignmentOptimizer {
 
                 if (roleName != null && weight != null) {
                     priorities.put(roleName, weight);
-                    logger.debug("Loaded role priority: {} = {}", roleName, weight);
+                    logger.info("Loaded role priority: {} = {}", roleName, weight);
                 }
             }
         } catch (SQLException e) {
@@ -1528,7 +1533,7 @@ public class CrimeAssignmentOptimizer {
 
         String rewardsSql = "SELECT crime_name, rewards_value_high, rewards_value_low FROM " + Constants.TABLE_NAME_OC2_CRIMES;
 
-        logger.debug("Loading crime rewards with SQL: {}", rewardsSql);
+        logger.info("Loading crime rewards with SQL: {}", rewardsSql);
 
         try (PreparedStatement stmt = configConnection.prepareStatement(rewardsSql);
              ResultSet rs = stmt.executeQuery()) {
@@ -1596,9 +1601,9 @@ public class CrimeAssignmentOptimizer {
 
             if (dbPriority != null) {
                 basePriority = dbPriority;
-                logger.debug("Using database priority for '{}' role '{}': {}", crimeName, slotPosition, basePriority);
+                logger.info("Using database priority for '{}' role '{}': {}", crimeName, slotPosition, basePriority);
             } else {
-                logger.debug("No database priority found for '{}' role '{}', using default: {}",
+                logger.info("No database priority found for '{}' role '{}', using default: {}",
                         crimeName, slotPosition, basePriority);
             }
         }
@@ -1635,7 +1640,7 @@ public class CrimeAssignmentOptimizer {
                 String factionId = rs.getString(Constants.COLUMN_NAME_FACTION_ID);
                 String dbSuffix = rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
 
-                logger.debug("Found faction record {}: ID={}, Suffix={}", totalFactions, factionId, dbSuffix);
+                logger.info("Found faction record {}: ID={}, Suffix={}", totalFactions, factionId, dbSuffix);
 
                 if (factionId != null && isValidDbSuffix(dbSuffix)) {
                     factions.add(new FactionInfo(factionId, dbSuffix));
@@ -1726,11 +1731,11 @@ public class CrimeAssignmentOptimizer {
 
         // Calculate crime completion probabilities
         Map<String, Double> completionProbs = calculateCrimeCompletionProbabilities(result.getAssignments());
-        logger.debug("Calculated completion probabilities for {} crimes", completionProbs.size());
+        logger.info("Calculated completion probabilities for {} crimes", completionProbs.size());
 
         // Generate strategic recommendations (urgency removed)
         List<String> strategicRecommendations = generateStrategicRecommendations(result, factionInfo);
-        logger.debug("Generated {} strategic recommendations", strategicRecommendations.size());
+        logger.info("Generated {} strategic recommendations", strategicRecommendations.size());
 
         // Calculate total expected value
         long totalExpectedValue = result.getAssignments().stream()
@@ -2038,7 +2043,7 @@ public class CrimeAssignmentOptimizer {
         String sql = "SELECT user_id, username, user_discord_id FROM " + membersTable +
                 " WHERE user_discord_id IS NOT NULL AND user_discord_id != ''";
 
-        logger.debug("Executing SQL: {}", sql);
+        logger.info("Executing SQL: {}", sql);
 
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
@@ -2052,14 +2057,14 @@ public class CrimeAssignmentOptimizer {
                 String username = rs.getString("username");
                 String discordId = rs.getString("user_discord_id");
 
-                logger.debug("Found member {}: {} ({}) - Discord ID: {}",
+                logger.info("Found member {}: {} ({}) - Discord ID: {}",
                         totalMembers, username, userId, discordId != null ? "SET" : "NULL");
 
                 if (userId != null && discordId != null && !discordId.trim().isEmpty()) {
                     mappings.put(userId, new DiscordMemberMapping(userId, username, discordId.trim()));
                     mappingCount++;
                 } else {
-                    logger.debug("  Skipping member {} - missing user_id or discord_id", username);
+                    logger.info("  Skipping member {} - missing user_id or discord_id", username);
                 }
             }
 
