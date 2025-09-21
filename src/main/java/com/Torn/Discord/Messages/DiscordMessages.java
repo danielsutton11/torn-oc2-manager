@@ -251,7 +251,7 @@ public class DiscordMessages {
 
         // Build dynamic description
         StringBuilder description = new StringBuilder();
-        description.append("The following users required the following items to complete their organised crimes:\n\n");
+        description.append("The following users require the following items to complete their organised crimes:\n\n");
 
         for (ItemRequest request : itemRequests) {
             description.append(String.format("**%s [%s]** needs %s\n",

@@ -493,6 +493,14 @@ public class CrimeAssignmentOptimizer {
                 availableSlots.stream().limit(3).forEach(slot -> logger.debug("  {}", slot));
             }
 
+            logger.info("PRE-OPTIMIZATION DEBUG for faction {}:", factionInfo.getFactionId());
+            logger.info("  Members with CPR >= 60: {}",
+                    availableMembers.stream()
+                            .mapToLong(member -> member.getCrimeSlotCPR().values().stream().filter(cpr -> cpr >= 60).count())
+                            .sum());
+            logger.info("  Total CPR entries across all members: {}",
+                    availableMembers.stream().mapToInt(member -> member.getCrimeSlotCPR().size()).sum());
+
             OptimizationResult result = optimizeAssignments(availableMembers, availableSlots, totalFactionMembers);
 
             logger.info("STEP 3 RESULT: Optimization completed for faction {} - {}", factionInfo.getFactionId(), result);
@@ -740,6 +748,13 @@ public class CrimeAssignmentOptimizer {
         // Normalize back to 100% by dividing by 1.25
         totalScore = totalScore / 1.25;
 
+        // ADD THIS DEBUG LOGGING HERE:
+        if (memberCPR != null && memberCPR >= 60) { // Only log for members that should qualify
+            logger.debug("SCORE DEBUG: {} -> {} - CPR:{} CompletionPriority:{:.2f} FinalScore:{:.3f} (cpr:{:.3f} value:{:.3f} priority:{:.3f} completion:{:.3f})",
+                    member.getUsername(), slot.getCrimeName(), memberCPR, slot.getCompletionPriority(),
+                    totalScore, cprScore, valueScore, priorityScore, completionScore);
+        }
+
         // Log reasoning for high-priority assignments
         if (slot.getCompletionPriority() > 2.0 && logger.isDebugEnabled()) {
             logger.debug("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: {:.2f}",
@@ -890,6 +905,10 @@ public class CrimeAssignmentOptimizer {
                             bestScore = scoreMatrix[m][s];
                             bestMember = m;
                             bestSlot = s;
+
+                            // ADD THIS DEBUG LOGGING HERE:
+                            logger.debug("NEW BEST (Pass1): {} -> {} - CPR:{} Score:{:.3f} CompletionPriority:{:.2f}",
+                                    member.getUsername(), slot.getCrimeName(), memberCPR, bestScore, slot.getCompletionPriority());
                         }
                     } else {
                         // Pass 2: Skip if CPR is above threshold (already handled in pass 1)
@@ -916,6 +935,16 @@ public class CrimeAssignmentOptimizer {
                         }
                     }
                 }
+            }
+
+            // ADD THIS DEBUG LOGGING HERE:
+            if (bestMember == -1) {
+                logger.info("ASSIGNMENT PASS DEBUG: No valid member found for any slot in pass {}", useCprFilter ? 1 : 2);
+            } else if (bestScore < 0.1) {
+                logger.info("ASSIGNMENT PASS DEBUG: Best score {:.3f} below threshold 0.1 in pass {}", bestScore, useCprFilter ? 1 : 2);
+            } else {
+                logger.debug("ASSIGNMENT PASS DEBUG: Found assignment {} -> {} with score {:.3f}",
+                        members.get(bestMember).getUsername(), slots.get(bestSlot).getCrimeName(), bestScore);
             }
 
             // No more good assignments found for this pass
@@ -1349,6 +1378,14 @@ public class CrimeAssignmentOptimizer {
 
                 slots.add(slot);
 
+                // ADD THIS DEBUG LOGGING HERE:
+                if (rowCount <= 10) { // Log first 10 entries instead of 5 for more data
+                    logger.info("DEBUG SLOT {}: {} - {} ({}) - Total:{} Available:{} Filled:{} CompletionPriority:{:.2f} ExpectedValue:{}",
+                            rowCount, slot.getCrimeName(), slot.getSlotPosition(), slot.getSlotPositionId(),
+                            slot.getTotalSlots(), slot.getAvailableSlots(), slot.getFilledSlots(),
+                            slot.getCompletionPriority(), slot.getExpectedValue());
+                }
+
                 if (rowCount <= 5) { // Log first few entries for debugging
                     logger.debug("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {:.2f}",
                             rowCount, slot.getCrimeName(), slot.getSlotPosition(),
@@ -1398,6 +1435,19 @@ public class CrimeAssignmentOptimizer {
                             logger.info("    {} {}: avg {:.0f}% complete, {} available slots across {} crimes",
                                     priorityLevel, crimeName, stats.getAverageCompletionRatio() * 100,
                                     availableSlots, stats.getCrimeCount());
+
+                            logger.info("COMPLETION SUMMARY for faction {}: {} unique crime types processed",
+                                    factionInfo.getFactionId(), crimeCompletionStats.size());
+
+                            // Log total slots by completion priority
+                            long urgentSlots = slots.stream().filter(s -> s.getCompletionPriority() >= 3.0).count();
+                            long highSlots = slots.stream().filter(s -> s.getCompletionPriority() >= 2.5 && s.getCompletionPriority() < 3.0).count();
+                            long mediumSlots = slots.stream().filter(s -> s.getCompletionPriority() >= 2.0 && s.getCompletionPriority() < 2.5).count();
+                            long lowSlots = slots.stream().filter(s -> s.getCompletionPriority() < 2.0).count();
+
+                            logger.info("SLOT PRIORITY DISTRIBUTION: Urgent(3.0+):{} High(2.5+):{} Medium(2.0+):{} Low(<2.0):{}",
+                                    urgentSlots, highSlots, mediumSlots, lowSlots);
+
                         });
             }
 
