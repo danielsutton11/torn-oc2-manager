@@ -135,9 +135,14 @@ public class CrimeAssignmentOptimizer {
         private final Timestamp expiredAt;
         private final Long expectedValue;
         private final Double slotPriority; // Higher = more important slot
+        private final Integer totalSlots;        // Total slots for this crime type (from all_oc_crimes)
+        private final Integer availableSlots;    // Number of available slots for this specific crime
+        private final Integer filledSlots;       // Calculated: totalSlots - availableSlots
+        private final Double completionPriority; // Calculated priority based on completion status
 
         public AvailableCrimeSlot(Long crimeId, String crimeName, String slotPosition, String slotPositionId,
-                                  Integer crimeDifficulty, Timestamp expiredAt, Long expectedValue, Double slotPriority) {
+                                  Integer crimeDifficulty, Timestamp expiredAt, Long expectedValue, Double slotPriority,
+                                  Integer totalSlots, Integer availableSlots) {
             this.crimeId = crimeId;
             this.crimeName = crimeName;
             this.slotPosition = slotPosition;
@@ -146,6 +151,10 @@ public class CrimeAssignmentOptimizer {
             this.expiredAt = expiredAt;
             this.expectedValue = expectedValue != null ? expectedValue : 0L;
             this.slotPriority = slotPriority != null ? slotPriority : 1.0;
+            this.totalSlots = totalSlots != null ? totalSlots : 6; // Default assumption
+            this.availableSlots = availableSlots != null ? availableSlots : 1;
+            this.filledSlots = this.totalSlots - this.availableSlots;
+            this.completionPriority = calculateCompletionPriority(this.totalSlots, this.filledSlots);
         }
 
         public Long getCrimeId() { return crimeId; }
@@ -156,6 +165,10 @@ public class CrimeAssignmentOptimizer {
         public Timestamp getExpiredAt() { return expiredAt; }
         public Long getExpectedValue() { return expectedValue; }
         public Double getSlotPriority() { return slotPriority; }
+        public Integer getTotalSlots() { return totalSlots; }
+        public Integer getAvailableSlots() { return availableSlots; }
+        public Integer getFilledSlots() { return filledSlots; }
+        public Double getCompletionPriority() { return completionPriority; }
 
         public String getSlotKey() {
             return crimeId + "|" + slotPositionId;
@@ -165,6 +178,47 @@ public class CrimeAssignmentOptimizer {
         public String toString() {
             return String.format("AvailableCrimeSlot{crimeId=%d, crimeName='%s', slotPosition='%s', expectedValue=%d}",
                     crimeId, crimeName, slotPosition, expectedValue);
+        }
+
+        /**
+         * Calculate completion priority based on how close the crime is to being full
+         * Higher values = higher priority
+         */
+        private static Double calculateCompletionPriority(Integer totalSlots, Integer filledSlots) {
+            if (totalSlots == null || totalSlots <= 0 || filledSlots == null || filledSlots < 0) {
+                return 1.0; // Default priority for unknown
+            }
+
+            if (filledSlots >= totalSlots) {
+                return 0.0; // Crime is already full, no priority
+            }
+
+            double completionRatio = (double) filledSlots / totalSlots;
+
+            // Progressive priority boost as crime gets closer to completion
+            if (completionRatio >= 0.75) {        // 75%+ filled
+                return 3.0; // Very high priority - almost complete
+            } else if (completionRatio >= 0.5) {  // 50-74% filled
+                return 2.5; // High priority - halfway there
+            } else if (completionRatio >= 0.25) { // 25-49% filled
+                return 2.0; // Medium-high priority - getting started
+            } else if (completionRatio > 0) {     // 1-24% filled
+                return 1.5; // Medium priority - has some progress
+            } else {                              // 0% filled
+                return 1.0; // Base priority - new crime
+            }
+        }
+
+        /**
+         * Get human-readable completion status
+         */
+        public String getCompletionStatus() {
+            if (totalSlots == null || filledSlots == null) {
+                return "Unknown progress";
+            }
+
+            return String.format("%d/%d slots filled (%.0f%%)",
+                    filledSlots, totalSlots, (filledSlots * 100.0 / totalSlots));
         }
     }
 
@@ -350,6 +404,38 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
+     * Load total slots for each crime type from CONFIG database
+     */
+    private static Map<String, Integer> loadCrimeTotalSlots(Connection configConnection) throws SQLException {
+        Map<String, Integer> crimeTotalSlots = new HashMap<>();
+
+        String sql = "SELECT crime_name, total_slots FROM all_oc_crimes";
+
+        logger.debug("Loading crime total slots from CONFIG database: {}", sql);
+
+        try (PreparedStatement stmt = configConnection.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String crimeName = rs.getString("crime_name");
+                Integer totalSlots = rs.getObject("total_slots", Integer.class);
+
+                if (crimeName != null && totalSlots != null) {
+                    crimeTotalSlots.put(crimeName, totalSlots);
+                    logger.debug("Loaded total slots for {}: {}", crimeName, totalSlots);
+                }
+            }
+
+        } catch (SQLException e) {
+            logger.warn("Could not load crime total slots from CONFIG database: {}", e.getMessage());
+            // Don't throw - we can still process with default values
+        }
+
+        logger.info("✓ Loaded total slots data for {} crime types", crimeTotalSlots.size());
+        return crimeTotalSlots;
+    }
+
+    /**
      * Optimize crime assignments for a single faction using advanced algorithms
      * Enhanced with comprehensive debugging
      */
@@ -467,8 +553,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Calculate optimization score for a member-slot combination (urgency removed)
-     * Now includes crime exp ranking as fallback when CPR is low
+     * Enhanced calculateMemberSlotScore method to include completion priority
+     * Replace the existing method with this enhanced version
      */
     private static double calculateMemberSlotScore(AvailableMember member, AvailableCrimeSlot slot) {
         // Factor 1: Member's CPR for this crime-slot (0-100, normalized to 0-1)
@@ -478,21 +564,37 @@ public class CrimeAssignmentOptimizer {
         // Factor 2: Crime value (normalized relative to maximum expected value)
         double valueScore = Math.min(slot.getExpectedValue() / 50_000_000.0, 1.0); // Cap at 50M
 
-        // Factor 3: Slot priority within the crime (increased importance)
+        // Factor 3: Slot priority within the crime
         double priorityScore = Math.min(slot.getSlotPriority(), 2.0) / 2.0; // Normalize to 0-1
 
-        // Factor 4: Member activity bonus (recent activity = higher priority)
+        // Factor 4: Member activity bonus
         double activityScore = calculateActivityScore(member);
 
-        // Factor 5: Crime experience ranking (1 = best, 100 = worst, normalized to 0-1)
-        double crimeExpScore = (101 - member.getCrimeExpRank()) / 100.0; // Convert to 0-1 where 1 is best
+        // Factor 5: Crime experience ranking
+        double crimeExpScore = (101 - member.getCrimeExpRank()) / 100.0;
 
-        // Weighted combination (urgency factor removed, weights redistributed)
-        double totalScore = (cprScore * CPR_WEIGHT) +
-                (valueScore * CRIME_VALUE_WEIGHT) +
-                (priorityScore * SLOT_PRIORITY_WEIGHT) +
-                (activityScore * 0.05) + // Small bonus for active members
-                (crimeExpScore * 0.05); // Small bonus for good crime exp rank
+        // Factor 6: Completion priority (prioritize partially filled crimes)
+        double completionScore = Math.min(slot.getCompletionPriority(), 3.0) / 3.0; // Normalize to 0-1
+
+        // Enhanced weighted combination with completion priority
+        double totalScore = (cprScore * CPR_WEIGHT) +                    // 30%
+                (valueScore * CRIME_VALUE_WEIGHT) +           // 20%
+                (priorityScore * SLOT_PRIORITY_WEIGHT) +      // 50%
+                (activityScore * 0.05) +                     // 5%
+                (crimeExpScore * 0.05) +                     // 5%
+                (completionScore * 0.15);                    // 15% - completion priority
+
+        // Adjust total weights to ensure they sum to reasonable values
+        // Total current weights: 30% + 20% + 50% + 5% + 5% + 15% = 125%
+        // Normalize back to 100% by dividing by 1.25
+        totalScore = totalScore / 1.25;
+
+        // Log reasoning for high-priority assignments
+        if (slot.getCompletionPriority() > 2.0 && logger.isDebugEnabled()) {
+            logger.debug("High completion priority assignment: {} to {} ({}) - {} - Completion Priority: {:.2f}",
+                    member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                    slot.getCompletionStatus(), slot.getCompletionPriority());
+        }
 
         return Math.max(0.0, Math.min(1.0, totalScore)); // Clamp to [0, 1]
     }
@@ -734,7 +836,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Generate human-readable reasoning for an assignment (updated for two-pass system)
+     * Enhanced generateAssignmentReasoning to include completion status
+     * Replace the existing method with this enhanced version
      */
     private static String generateAssignmentReasoning(AvailableMember member, AvailableCrimeSlot slot,
                                                       double score, boolean isCprBased) {
@@ -743,22 +846,33 @@ public class CrimeAssignmentOptimizer {
         Integer cpr = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
         int expRank = member.getCrimeExpRank();
 
+        // Add completion priority reasoning first (most important)
+        if (slot.getCompletionPriority() >= 3.0) {
+            reasons.add("🔥 URGENT: " + slot.getCompletionStatus() + " - nearly complete!");
+        } else if (slot.getCompletionPriority() >= 2.5) {
+            reasons.add("⚡ HIGH PRIORITY: " + slot.getCompletionStatus() + " - good progress");
+        } else if (slot.getCompletionPriority() >= 2.0) {
+            reasons.add("📈 ACTIVE CRIME: " + slot.getCompletionStatus() + " - building momentum");
+        } else if (slot.getCompletionPriority() > 1.0) {
+            reasons.add("🟡 STARTED: " + slot.getCompletionStatus() + " - has some progress");
+        }
+
         if (isCprBased) {
             // Pass 1 reasoning (CPR-based)
             if (slot.getSlotPriority() > 2.0) {
-                reasons.add("Critical priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
+                reasons.add("Critical role (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
             } else if (slot.getSlotPriority() > 1.5) {
-                reasons.add("High priority slot (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
+                reasons.add("Important role (weight: " + String.format("%.1f", slot.getSlotPriority()) + ")");
             }
 
             if (cpr != null && cpr > 80) {
-                reasons.add("High CPR (" + cpr + "%)");
+                reasons.add("Excellent CPR (" + cpr + "%)");
             } else if (cpr != null && cpr > 60) {
                 reasons.add("Good CPR (" + cpr + "%)");
             }
 
             if (slot.getExpectedValue() > 20_000_000) {
-                reasons.add("High value crime ($" + String.format("%.1fM", slot.getExpectedValue() / 1_000_000.0) + ")");
+                reasons.add("High value ($" + String.format("%.1fM", slot.getExpectedValue() / 1_000_000.0) + ")");
             }
         } else {
             // Pass 2 reasoning (Experience ranking fallback)
@@ -770,12 +884,10 @@ public class CrimeAssignmentOptimizer {
                 reasons.add("Good crime experience (rank " + expRank + ")");
             } else if (expRank <= 50) {
                 reasons.add("Moderate crime experience (rank " + expRank + ")");
-            } else {
-                reasons.add("Basic crime experience (rank " + expRank + ")");
             }
 
             if (slot.getSlotPriority() > 1.5) {
-                reasons.add("Priority slot needs filling");
+                reasons.add("Important role needs filling");
             }
         }
 
@@ -979,8 +1091,8 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Load available crime slots with expected values
-     * Enhanced with comprehensive debugging and error handling
+     * Enhanced loadAvailableCrimeSlots method to calculate completion data
+     * Replace the existing method with this enhanced version
      */
     private static List<AvailableCrimeSlot> loadAvailableCrimeSlots(Connection configConnection,
                                                                     Connection ocDataConnection,
@@ -988,9 +1100,9 @@ public class CrimeAssignmentOptimizer {
         List<AvailableCrimeSlot> slots = new ArrayList<>();
         String availableCrimesTable = "a_crimes_" + factionInfo.getDbSuffix();
 
-        logger.info("DEBUG: Attempting to load crime slots from OC_DATA table: {}", availableCrimesTable);
+        logger.info("DEBUG: Loading crime slots with completion data from table: {}", availableCrimesTable);
 
-        // Check if table exists first
+        // Check if table exists
         try {
             verifyTableExists(ocDataConnection, availableCrimesTable, "available crimes");
             logger.info("✓ Table {} exists and is accessible", availableCrimesTable);
@@ -1000,75 +1112,144 @@ public class CrimeAssignmentOptimizer {
             throw new SQLException("Available crimes table missing for faction " + factionInfo.getFactionId(), e);
         }
 
-        // First, load the OC2 crimes reference data from CONFIG database
-        logger.info("Loading crime reward data from CONFIG database...");
+        // Load supporting data
         Map<String, CrimeRewardData> crimeRewards = loadCrimeRewardsFromConfig(configConnection);
-        logger.info("✓ Loaded {} crime reward entries from CONFIG database", crimeRewards.size());
-
-        // Load role priorities from CONFIG database
-        logger.info("Loading role priorities from CONFIG database...");
         Map<String, Double> rolePriorities = loadRolePrioritiesFromConfig(configConnection);
-        logger.info("✓ Loaded {} role priority entries from CONFIG database", rolePriorities.size());
+        Map<String, Integer> crimeTotalSlots = loadCrimeTotalSlots(configConnection);
 
-        // Then load available crimes from OC_DATA database
-        String slotsSql = "SELECT crime_id, name, difficulty, expired_at, " +
-                "slot_position, slot_position_id " +
+        // First, count available slots per crime to calculate completion status
+        String countSql = "SELECT " +
+                "crime_id, " +
+                "name, " +
+                "COUNT(*) as available_slot_count " +
                 "FROM " + availableCrimesTable + " " +
-                "ORDER BY difficulty DESC";
+                "GROUP BY crime_id, name";
 
-        logger.debug("Executing SQL: {}", slotsSql);
+        Map<Long, Integer> crimeAvailableSlotCounts = new HashMap<>();
+        Map<Long, String> crimeNames = new HashMap<>();
 
-        try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql)) {
+        logger.debug("Counting available slots per crime: {}", countSql);
 
-            try (ResultSet slotsRs = slotsStmt.executeQuery()) {
-                int rowCount = 0;
-                Map<String, Integer> crimeSlotCounts = new HashMap<>();
+        try (PreparedStatement countStmt = ocDataConnection.prepareStatement(countSql);
+             ResultSet countRs = countStmt.executeQuery()) {
 
-                while (slotsRs.next()) {
-                    rowCount++;
-                    Long crimeId = slotsRs.getLong("crime_id");
-                    String crimeName = slotsRs.getString("name");
-                    String slotPosition = slotsRs.getString("slot_position");
-                    String slotPositionId = slotsRs.getString("slot_position_id");
-                    Integer difficulty = slotsRs.getObject("difficulty", Integer.class);
-                    Timestamp expiredAt = slotsRs.getTimestamp("expired_at");
+            while (countRs.next()) {
+                Long crimeId = countRs.getLong("crime_id");
+                String crimeName = countRs.getString("name");
+                Integer availableCount = countRs.getInt("available_slot_count");
 
-                    // Track crime types for summary
-                    crimeSlotCounts.merge(crimeName, 1, Integer::sum);
-
-                    // Get reward data from the config database lookup
-                    CrimeRewardData rewardData = crimeRewards.get(crimeName);
-                    Long rewardsHigh = rewardData != null ? rewardData.getHighValue() : null;
-                    Long rewardsLow = rewardData != null ? rewardData.getLowValue() : null;
-
-                    Long expectedValue = calculateExpectedValue(rewardsHigh, rewardsLow, difficulty);
-                    Double slotPriority = calculateSlotPriority(crimeName, slotPosition, difficulty, rolePriorities);
-
-                    AvailableCrimeSlot slot = new AvailableCrimeSlot(crimeId, crimeName, slotPosition, slotPositionId,
-                            difficulty, expiredAt, expectedValue, slotPriority);
-
-                    slots.add(slot);
-
-                    if (rowCount <= 5) { // Log first few entries for debugging
-                        logger.debug("  Slot {}: {}", rowCount, slot);
-                    }
-                }
-
-                logger.info("✓ Successfully loaded {} crime slots from table {} for faction {}",
-                        rowCount, availableCrimesTable, factionInfo.getFactionId());
-
-                // Log summary by crime type
-                if (!crimeSlotCounts.isEmpty()) {
-                    logger.info("  Crime slot breakdown for faction {}:", factionInfo.getFactionId());
-                    crimeSlotCounts.entrySet().stream()
-                            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                            .forEach(entry -> logger.info("    {}: {} slots", entry.getKey(), entry.getValue()));
-                } else {
-                    logger.warn("WARNING: No crime slots found for faction {} (no crimes spawned or all full)",
-                            factionInfo.getFactionId());
-                }
-
+                crimeAvailableSlotCounts.put(crimeId, availableCount);
+                crimeNames.put(crimeId, crimeName);
             }
+        }
+
+        // Now load individual slots with completion data
+        String slotsSql = "SELECT " +
+                "crime_id, " +
+                "name, " +
+                "difficulty, " +
+                "expired_at, " +
+                "slot_position, " +
+                "slot_position_id " +
+                "FROM " + availableCrimesTable + " " +
+                "ORDER BY crime_id, slot_position_id";
+
+
+        logger.debug("Loading individual slots: {}", slotsSql);
+
+        try (PreparedStatement slotsStmt = ocDataConnection.prepareStatement(slotsSql);
+             ResultSet slotsRs = slotsStmt.executeQuery()) {
+
+            int rowCount = 0;
+            Map<String, Integer> crimeSlotCounts = new HashMap<>();
+            Map<String, CompletionStats> crimeCompletionStats = new HashMap<>();
+
+            while (slotsRs.next()) {
+                rowCount++;
+                Long crimeId = slotsRs.getLong("crime_id");
+                String crimeName = slotsRs.getString("name");
+                String slotPosition = slotsRs.getString("slot_position");
+                String slotPositionId = slotsRs.getString("slot_position_id");
+                Integer difficulty = slotsRs.getObject("difficulty", Integer.class);
+                Timestamp expiredAt = slotsRs.getTimestamp("expired_at");
+
+                // Get completion data
+                Integer totalSlots = crimeTotalSlots.getOrDefault(crimeName, 6); // Default to 6 if not found
+                Integer availableSlots = crimeAvailableSlotCounts.getOrDefault(crimeId, 1);
+                Integer filledSlots = totalSlots - availableSlots;
+
+                // Track statistics
+                crimeSlotCounts.merge(crimeName, 1, Integer::sum);
+                crimeCompletionStats.computeIfAbsent(crimeName, k -> new CompletionStats())
+                        .addCrime(totalSlots, filledSlots, availableSlots);
+
+                // Calculate values using existing logic
+                CrimeRewardData rewardData = crimeRewards.get(crimeName);
+                Long rewardsHigh = rewardData != null ? rewardData.getHighValue() : null;
+                Long rewardsLow = rewardData != null ? rewardData.getLowValue() : null;
+                Long expectedValue = calculateExpectedValue(rewardsHigh, rewardsLow, difficulty);
+                Double slotPriority = calculateSlotPriority(crimeName, slotPosition, difficulty, rolePriorities);
+
+                // Create enhanced slot with completion data
+                AvailableCrimeSlot slot = new AvailableCrimeSlot(
+                        crimeId, crimeName, slotPosition, slotPositionId,
+                        difficulty, expiredAt, expectedValue, slotPriority,
+                        totalSlots, availableSlots);
+
+                slots.add(slot);
+
+                if (rowCount <= 5) { // Log first few entries for debugging
+                    logger.debug("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {:.2f}",
+                            rowCount, slot.getCrimeName(), slot.getSlotPosition(),
+                            slot.getCompletionStatus(), slot.getCompletionPriority());
+                }
+            }
+
+            // Sort slots by completion priority, then by other factors
+            slots.sort((a, b) -> {
+                // Primary sort: completion priority (descending)
+                int priorityCompare = Double.compare(b.getCompletionPriority(), a.getCompletionPriority());
+                if (priorityCompare != 0) return priorityCompare;
+
+                // Secondary sort: difficulty (descending)
+                int diffCompare = Integer.compare(
+                        b.getCrimeDifficulty() != null ? b.getCrimeDifficulty() : 0,
+                        a.getCrimeDifficulty() != null ? a.getCrimeDifficulty() : 0
+                );
+                if (diffCompare != 0) return diffCompare;
+
+                // Tertiary sort: expected value (descending)
+                return Long.compare(b.getExpectedValue(), a.getExpectedValue());
+            });
+
+            logger.info("✓ Successfully loaded {} crime slots with completion data for faction {}",
+                    rowCount, factionInfo.getFactionId());
+
+            // Enhanced logging with completion statistics
+            if (!crimeCompletionStats.isEmpty()) {
+                logger.info("  Crime completion breakdown for faction {}:", factionInfo.getFactionId());
+
+                // Sort by average completion percentage for better readability
+                crimeCompletionStats.entrySet().stream()
+                        .sorted((a, b) -> Double.compare(
+                                b.getValue().getAverageCompletionRatio(),
+                                a.getValue().getAverageCompletionRatio()))
+                        .forEach(entry -> {
+                            String crimeName = entry.getKey();
+                            CompletionStats stats = entry.getValue();
+                            int availableSlots = crimeSlotCounts.getOrDefault(crimeName, 0);
+
+                            String priorityLevel = stats.getAverageCompletionRatio() >= 0.75 ? "🔥 URGENT" :
+                                    stats.getAverageCompletionRatio() >= 0.5 ? "⚡ HIGH" :
+                                            stats.getAverageCompletionRatio() >= 0.25 ? "📈 MEDIUM" :
+                                                    stats.getAverageCompletionRatio() > 0 ? "🟡 STARTED" : "🆕 NEW";
+
+                            logger.info("    {} {}: avg {:.0f}% complete, {} available slots across {} crimes",
+                                    priorityLevel, crimeName, stats.getAverageCompletionRatio() * 100,
+                                    availableSlots, stats.getCrimeCount());
+                        });
+            }
+
         } catch (SQLException e) {
             logger.error("✗ ERROR: Could not load available crime slots for faction {} from table {}: {}",
                     factionInfo.getFactionId(), availableCrimesTable, e.getMessage());
@@ -1077,6 +1258,33 @@ public class CrimeAssignmentOptimizer {
 
         return slots;
     }
+
+    /**
+     * Helper class to track completion statistics across multiple crimes of the same type
+     */
+    private static class CompletionStats {
+        private int crimeCount = 0;
+        private int totalSlotsSum = 0;
+        private int filledSlotsSum = 0;
+        private int availableSlotsSum = 0;
+
+        public void addCrime(int totalSlots, int filledSlots, int availableSlots) {
+            this.crimeCount++;
+            this.totalSlotsSum += totalSlots;
+            this.filledSlotsSum += filledSlots;
+            this.availableSlotsSum += availableSlots;
+        }
+
+        public double getAverageCompletionRatio() {
+            return totalSlotsSum > 0 ? (double) filledSlotsSum / totalSlotsSum : 0.0;
+        }
+
+        public int getCrimeCount() { return crimeCount; }
+        public int getTotalSlotsSum() { return totalSlotsSum; }
+        public int getFilledSlotsSum() { return filledSlotsSum; }
+        public int getAvailableSlotsSum() { return availableSlotsSum; }
+    }
+
 
     /**
      * Load role priorities from CONFIG database
@@ -1364,18 +1572,37 @@ public class CrimeAssignmentOptimizer {
     }
 
     /**
-     * Generate strategic recommendations based on optimization results (urgency removed)
+     * Enhanced strategic recommendations to mention completion prioritization
+     * Add this to your generateStrategicRecommendations method
      */
     private static List<String> generateStrategicRecommendations(OptimizationResult result, FactionInfo factionInfo) {
         List<String> recommendations = new ArrayList<>();
 
-        // Analysis of assignments
         if (result.getAssignments().isEmpty()) {
             recommendations.add("No members available for assignment - consider recruiting more active members");
             return recommendations;
         }
 
-        // High-value crime recommendations (priority increased without urgency factor)
+        // Completion-based recommendations
+        List<MemberSlotAssignment> urgentCompletions = result.getAssignments().stream()
+                .filter(a -> a.getSlot().getCompletionPriority() >= 3.0)
+                .collect(Collectors.toList());
+
+        List<MemberSlotAssignment> nearCompletions = result.getAssignments().stream()
+                .filter(a -> a.getSlot().getCompletionPriority() >= 2.5 && a.getSlot().getCompletionPriority() < 3.0)
+                .collect(Collectors.toList());
+
+        if (!urgentCompletions.isEmpty()) {
+            recommendations.add(String.format("🔥 URGENT: %d crimes are nearly complete (75%+ filled) - prioritize these for immediate returns",
+                    urgentCompletions.size()));
+        }
+
+        if (!nearCompletions.isEmpty()) {
+            recommendations.add(String.format("⚡ Focus on %d active crimes (50%+ filled) for efficient completion",
+                    nearCompletions.size()));
+        }
+
+        // High-value crime recommendations
         long highValueThreshold = 30_000_000L;
         List<MemberSlotAssignment> highValueAssignments = result.getAssignments().stream()
                 .filter(a -> a.getSlot().getExpectedValue() > highValueThreshold)
@@ -1386,54 +1613,11 @@ public class CrimeAssignmentOptimizer {
                     highValueAssignments.size(), highValueThreshold / 1_000_000));
         }
 
-        // High-priority slot recommendations (enhanced importance)
-        List<MemberSlotAssignment> highPriorityAssignments = result.getAssignments().stream()
-                .filter(a -> a.getSlot().getSlotPriority() > 1.8)
-                .collect(Collectors.toList());
-
-        if (!highPriorityAssignments.isEmpty()) {
-            recommendations.add(String.format("Prioritize %d critical roles (Robber, Hacker) for optimal crime success",
-                    highPriorityAssignments.size()));
-        }
-
-        // CPR improvement recommendations
-        double avgScore = result.getAssignments().stream()
-                .mapToDouble(MemberSlotAssignment::getOptimizationScore)
-                .average()
-                .orElse(0.0);
-
-        if (avgScore < 0.6) {
-            recommendations.add("Consider CPR training - average assignment quality is below optimal");
-        }
-
         // Resource efficiency
         if (result.getUnfilledSlots() > result.getUnassignedMembers()) {
             recommendations.add("More crime slots available than members - consider recruitment");
         } else if (result.getUnassignedMembers() > result.getUnfilledSlots()) {
             recommendations.add("More members than slots - consider spawning additional crimes");
-        }
-
-        // Member activity recommendations
-        long inactiveMembers = result.getAssignments().stream()
-                .filter(a -> a.getMember().getLastJoinedCrimeDate() == null ||
-                        (System.currentTimeMillis() - a.getMember().getLastJoinedCrimeDate().getTime()) >
-                                (7 * 24 * 60 * 60 * 1000L)) // 7 days
-                .count();
-
-        if (inactiveMembers > 0) {
-            recommendations.add(String.format("Consider engaging %d less active members in crimes to improve participation",
-                    inactiveMembers));
-        }
-
-        // Value-based strategic recommendations (replaces urgency-based logic)
-        double totalValue = result.getAssignments().stream()
-                .mapToLong(a -> a.getSlot().getExpectedValue())
-                .sum();
-
-        if (totalValue > 200_000_000L) {
-            recommendations.add("Excellent value potential - focus on completing these high-return crimes");
-        } else if (totalValue < 50_000_000L) {
-            recommendations.add("Consider waiting for higher-value crimes to maximize faction returns");
         }
 
         return recommendations;
