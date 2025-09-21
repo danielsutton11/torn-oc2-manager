@@ -4,19 +4,17 @@ import com.Torn.Execute;
 import com.Torn.FactionCrimes.Available.GetAvailableCrimes;
 import com.Torn.Helpers.Constants;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.stream.Collectors;
 
 import java.sql.*;
-import java.time.Instant;
 import java.util.*;
-import com.Torn.Discord.Messages.DiscordMessages;
+import java.util.stream.IntStream;
 
-import static com.Torn.Discord.Messages.DiscordMessages.sendNeedCrimesToSpawnForAvailableMembers;
+import com.Torn.Discord.Messages.DiscordMessages;
 
 /**
  * Algorithmic optimizer for assigning available members to available crime slots
- * based on CPR, crime value, and slot priority
+ * based on completion priority, CPR, crime value, and slot priority
 
  For Each Faction:
  ├── Load Available Members (from OC_DATA)
@@ -25,48 +23,56 @@ import static com.Torn.Discord.Messages.DiscordMessages.sendNeedCrimesToSpawnFor
  │   └── Get crime experience ranking (1-100) from CONFIG database
  ├── Load Available Crime Slots (from OC_DATA)
  │   ├── Get empty slots across all active crimes
+ │   ├── Calculate completion priority based on slots filled (Urgent: 75%+, High: 50%+, Medium: 25%+)
  │   ├── Calculate expected value for each crime
- │   └── Determine slot priority (Robber > Hacker > Driver, etc.)
+ │   ├── Determine slot priority from crimes_roles_priority table (with fallback defaults)
+ │   └── Validate total slots vs available slots (fix data inconsistencies)
  └── Load Discord Mappings (from CONFIG)
  └── Match member IDs to Discord usernames for notifications
 
- └── Prioritise crimes with few slots remaining
- For each available slot:
- ├── Find members with CPR >= 60 for that specific crime-role
- ├── Score each member-slot combination based on:
- │   ├── 50% - Slot Priority (how critical the role is)
+ COMPLETION-PRIORITY-FIRST ASSIGNMENT:
+ ├── Sort all available slots by completion priority (descending), then by expected value
+ ├── Process slots in strategic order:
+ │   ├── 1st Priority: Nearly complete crimes (75%+ filled, priority 3.0+)
+ │   ├── 2nd Priority: Active crimes (50%+ filled, priority 2.5+)
+ │   ├── 3rd Priority: Started crimes (25%+ filled, priority 2.0+)
+ │   └── 4th Priority: New crimes (0% filled, priority 1.0+)
+ └── For each slot in priority order:
+ ├── Find best available member for that specific slot
+ ├── Apply qualification filters:
+ │   ├── High-difficulty crimes (7+): Require CPR >= 60 OR top 25% experience rank
+ │   └── All crimes: Use existing scoring system
+ ├── Score based on:
  │   ├── 30% - Member's CPR for that specific role
  │   ├── 20% - Crime's expected value
- │   └── Small bonuses for recent activity
- └── Assign highest-scoring combinations first
+ │   ├── 50% - Slot priority within crime
+ │   ├── 15% - Completion priority (how urgent the crime is)
+ │   ├── 5% - Crime experience ranking
+ │   └── 5% - Activity bonus (recent participation)
+ └── Assign best qualified member and continue
 
- For remaining unfilled slots:
- ├── Use members who didn't qualify for Pass 1 (CPR < 60)
- ├── Score based on:
- │   ├── 50% - Slot Priority
- │   ├── 30% - Crime Experience Ranking (1 = best, 100 = worst), only top 25% of faction members for crime exp are recommended to crime difficulty 7+
- │   ├── 10% - Crime Value
- │   └── 10% - Activity Bonus
- └── Assign the best available matches
-
- IF (members with CPR >= 60 available):
- └── Use high-quality CPR-based assignments
-
- IF (no members meet CPR threshold):
- └── Fall back to crime experience ranking
- └── Still fill slots with the best available members
-
- IF (some slots filled in Pass 1, some need Pass 2):
- └── Hybrid approach - quality where possible, coverage everywhere else
+ UNASSIGNED MEMBER HANDLING:
+ ├── Track members who couldn't be assigned to any available slots
+ ├── Send "need crimes to spawn" Discord notification for unassigned members
+ ├── Categorize unassigned members by experience level for reporting
+ └── Provide strategic recommendations for faction leadership
 
  For Each Assignment:
  ├── Generate human-readable reasoning:
- │   ├── CPR-based: "High CPR (85%), Critical priority slot"
+ │   ├── Priority-based: "🔥 URGENT: 5/6 slots filled (83%) - nearly complete!"
+ │   ├── CPR-based: "Excellent CPR (85%), Critical priority slot"
  │   └── Fallback: "Fallback assignment (CPR < 60), Good crime experience (rank 15)"
  ├── Group by crime for organized display
- ├── Add strategic recommendations
- └── Send formatted message with member mentions
+ ├── Calculate completion probabilities and expected values
+ ├── Add strategic recommendations (focus on urgent completions)
+ └── Send formatted Discord message with member mentions
 
+ KEY IMPROVEMENTS:
+ ├── Completion-driven strategy ensures partially filled crimes get priority
+ ├── Data validation prevents incorrect completion calculations
+ ├── Better database type handling (Number -> Double conversion)
+ ├── Enhanced logging shows assignment reasoning and priorities
+ └── Unassigned member notifications help optimize crime spawning
  */
 
 public class CrimeAssignmentOptimizer {
@@ -155,9 +161,18 @@ public class CrimeAssignmentOptimizer {
             this.expiredAt = expiredAt;
             this.expectedValue = expectedValue != null ? expectedValue : 0L;
             this.slotPriority = slotPriority != null ? slotPriority : 1.0;
-            this.totalSlots = totalSlots != null ? totalSlots : 6; // Default assumption
+
+            // FIX: If totalSlots is unknown, use availableSlots as minimum
+            if (totalSlots == null || totalSlots < (availableSlots != null ? availableSlots : 0)) {
+                this.totalSlots = availableSlots != null ? availableSlots : 4; // Use available as minimum
+                logger.warn("Unknown total slots for {} - using available slots ({}) as total",
+                        crimeName, this.totalSlots);
+            } else {
+                this.totalSlots = totalSlots;
+            }
+
             this.availableSlots = availableSlots != null ? availableSlots : 1;
-            this.filledSlots = this.totalSlots - this.availableSlots;
+            this.filledSlots = Math.max(0, this.totalSlots - this.availableSlots); // Ensure non-negative
             this.completionPriority = calculateCompletionPriority(this.totalSlots, this.filledSlots);
         }
 
@@ -319,7 +334,7 @@ public class CrimeAssignmentOptimizer {
         try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
              Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
 
-            logger.info("✓ Database connections established successfully");
+            logger.info(" Database connections established successfully");
 
             logger.info("Loading faction information...");
             List<FactionInfo> factions = getFactionInfo(configConnection);
@@ -329,7 +344,7 @@ public class CrimeAssignmentOptimizer {
                 return;
             }
 
-            logger.info("✓ Found {} OC2-enabled factions to optimize", factions.size());
+            logger.info(" Found {} OC2-enabled factions to optimize", factions.size());
             for (int i = 0; i < factions.size(); i++) {
                 FactionInfo faction = factions.get(i);
                 logger.info("  {}. Faction ID: {}, DB Suffix: {}", i + 1, faction.getFactionId(), faction.getDbSuffix());
@@ -352,7 +367,7 @@ public class CrimeAssignmentOptimizer {
                             configConnection, ocDataConnection, factionInfo);
 
                     if (result != null) {
-                        logger.info("✓ Optimization completed for faction {} - {} assignments (score: %.3f)",
+                        logger.info("Optimization completed for faction {} - {} assignments (score: {})",
                                 factionInfo.getFactionId(), result.getAssignments().size(), result.getTotalScore());
 
                         // Log detailed results
@@ -374,14 +389,14 @@ public class CrimeAssignmentOptimizer {
 
                         successfulCount++;
                     } else {
-                        logger.warn("✗ No optimization result returned for faction {}", factionInfo.getFactionId());
+                        logger.warn("  No optimization result returned for faction {}", factionInfo.getFactionId());
                         failedCount++;
                     }
 
                     processedCount++;
 
                 } catch (Exception e) {
-                    logger.error("✗ EXCEPTION: Error optimizing faction {}: {}",
+                    logger.error("  EXCEPTION: Error optimizing faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                     failedCount++;
                     processedCount++; // Still count as processed
@@ -413,7 +428,7 @@ public class CrimeAssignmentOptimizer {
     private static Map<String, Integer> loadCrimeTotalSlots(Connection configConnection) throws SQLException {
         Map<String, Integer> crimeTotalSlots = new HashMap<>();
 
-        String sql = "SELECT crime_name, total_slots FROM all_oc_crimes";
+        String sql = "SELECT crime_name, total_slots FROM all_oc2_crimes";
 
         logger.info("Loading crime total slots from CONFIG database: {}", sql);
 
@@ -435,7 +450,7 @@ public class CrimeAssignmentOptimizer {
             // Don't throw - we can still process with default values
         }
 
-        logger.info("✓ Loaded total slots data for {} crime types", crimeTotalSlots.size());
+        logger.info(" Loaded total slots data for {} crime types", crimeTotalSlots.size());
         return crimeTotalSlots;
     }
 
@@ -555,7 +570,7 @@ public class CrimeAssignmentOptimizer {
 
             sendNeedCrimesToSpawnForAvailableMembers(configConnection, factionInfo, unassignedMembers);
 
-            logger.info("✓ Successfully sent crime spawning notification for faction {}", factionInfo.getFactionId());
+            logger.info(" Successfully sent crime spawning notification for faction {}", factionInfo.getFactionId());
 
         } catch (Exception e) {
             logger.error("ERROR: Failed to handle unassigned members for faction {}: {}",
@@ -611,10 +626,10 @@ public class CrimeAssignmentOptimizer {
             boolean success = DiscordMessages.sendNeedCrimesToSpawnForAvailableMembers(factionInfo.getFactionId());
 
             if (success) {
-                logger.info("✓ Successfully sent crime spawning Discord notification for faction {}",
+                logger.info(" Successfully sent crime spawning Discord notification for faction {}",
                         factionInfo.getFactionId());
             } else {
-                logger.warn("✗ Failed to send crime spawning Discord notification for faction {}",
+                logger.warn("  Failed to send crime spawning Discord notification for faction {}",
                         factionInfo.getFactionId());
             }
 
@@ -682,7 +697,7 @@ public class CrimeAssignmentOptimizer {
         // Sort assignments by score (highest first)
         assignments.sort((a, b) -> Double.compare(b.getOptimizationScore(), a.getOptimizationScore()));
 
-        logger.info("Optimization algorithm completed: {} assignments, total score: %.3f",
+        logger.info("Optimization algorithm completed: {} assignments, total score: {}",
                 assignments.size(), totalScore);
 
         return new OptimizationResult(assignments, totalScore, unfilledSlots, unassignedMembers);
@@ -793,29 +808,59 @@ public class CrimeAssignmentOptimizer {
         boolean[] memberUsed = new boolean[members.size()];
         boolean[] slotUsed = new boolean[slots.size()];
 
-        // Minimum CPR threshold for role assignment
-        final int MIN_CPR_THRESHOLD = 60;
+        logger.info("Starting assignment process with completion priority ordering: {} members, {} slots",
+                members.size(), slots.size());
 
-        logger.info("Starting assignment process: {} members, {} slots", members.size(), slots.size());
+        // Sort slots by completion priority (highest first), then by expected value
+        List<Integer> slotIndices = IntStream.range(0, slots.size())
+                .boxed()
+                .sorted((a, b) -> {
+                    AvailableCrimeSlot slotA = slots.get(a);
+                    AvailableCrimeSlot slotB = slots.get(b);
 
-        // PASS 1: CPR-based assignments (CPR >= 60)
-        logger.info("PASS 1: Assigning members with CPR >= {}", MIN_CPR_THRESHOLD);
-        int pass1Assignments = performAssignmentPass(members, slots, scoreMatrix, memberUsed, slotUsed,
-                assignments, MIN_CPR_THRESHOLD, true, totalFactionMembers);
-        logger.info("PASS 1 COMPLETE: {} assignments made with CPR >= {}", pass1Assignments, MIN_CPR_THRESHOLD);
+                    // Primary sort: completion priority (higher first)
+                    int priorityCompare = Double.compare(slotB.getCompletionPriority(), slotA.getCompletionPriority());
+                    if (priorityCompare != 0) return priorityCompare;
 
-        // PASS 2: Crime experience ranking fallback for remaining slots
-        int remainingSlots = countRemainingSlots(slotUsed);
-        int remainingMembers = countRemainingMembers(memberUsed);
+                    // Secondary sort: expected value (higher first)
+                    return Long.compare(slotB.getExpectedValue(), slotA.getExpectedValue());
+                })
+                .collect(Collectors.toList());
 
+        logger.info("Slot assignment order by completion priority:");
+        for (int i = 0; i < Math.min(5, slotIndices.size()); i++) {
+            AvailableCrimeSlot slot = slots.get(slotIndices.get(i));
+            logger.info("  {}. {} ({}) - Priority: {}, Value: ${}M",
+                    i + 1, slot.getCrimeName(), slot.getSlotPosition(),
+                    slot.getCompletionPriority(), slot.getExpectedValue() / 1_000_000);
+        }
 
-        // PASS 2: Crime experience ranking fallback for remaining slots
-        if (remainingSlots > 0 && remainingMembers > 0) {
-            logger.info("PASS 2: Using crime experience ranking fallback for {} remaining slots with {} remaining members",
-                    remainingSlots, remainingMembers);
-            int pass2Assignments = performAssignmentPass(members, slots, scoreMatrix, memberUsed, slotUsed,
-                    assignments, MIN_CPR_THRESHOLD, false, totalFactionMembers);
-            logger.info("PASS 2 COMPLETE: {} additional assignments made using crime experience ranking", pass2Assignments);
+        // Assign slots in priority order
+        for (Integer slotIndex : slotIndices) {
+            if (slotUsed[slotIndex]) continue;
+
+            AvailableCrimeSlot slot = slots.get(slotIndex);
+
+            // Find best available member for this specific slot
+            int bestMember = findBestMemberForSlot(slot, members, memberUsed, scoreMatrix, totalFactionMembers, slotIndex);
+
+            if (bestMember != -1) {
+                AvailableMember member = members.get(bestMember);
+                double score = scoreMatrix[bestMember][slotIndex];
+                Integer memberCPR = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
+
+                String reasoning = generateAssignmentReasoning(member, slot, score,
+                        memberCPR != null && memberCPR >= 60);
+
+                assignments.add(new MemberSlotAssignment(member, slot, score, reasoning));
+
+                logger.info("PRIORITY ASSIGNMENT: {} -> {} ({}) - CompletionPri:{} CPR:{} Score:{}",
+                        member.getUsername(), slot.getCrimeName(), slot.getSlotPosition(),
+                        slot.getCompletionPriority(), memberCPR != null ? memberCPR : "N/A", score);
+
+                memberUsed[bestMember] = true;
+                slotUsed[slotIndex] = true;
+            }
         }
 
         // Log final summary
@@ -823,14 +868,51 @@ public class CrimeAssignmentOptimizer {
         int assignedSlots = assignments.size();
         int unassignedSlots = totalSlots - assignedSlots;
 
-        logger.info("ASSIGNMENT SUMMARY:");
+        logger.info("COMPLETION-PRIORITY ASSIGNMENT SUMMARY:");
         logger.info("  Total slots: {}", totalSlots);
-        logger.info("  Assigned slots: {} ({}%)", assignedSlots, String.format("%.1f", (assignedSlots * 100.0 / totalSlots)));
-        logger.info("  Pass 1 (CPR >= {}): {}", MIN_CPR_THRESHOLD, pass1Assignments);
-        logger.info("  Pass 2 (Exp Rank): {}", assignedSlots - pass1Assignments);
+        logger.info("  Assigned slots: {} ({}%)", assignedSlots,
+                String.format("%.1f", (assignedSlots * 100.0 / totalSlots)));
         logger.info("  Unassigned slots: {}", unassignedSlots);
 
         return assignments;
+    }
+
+    /**
+     * Find the best available member for a specific slot
+     */
+    private static int findBestMemberForSlot(AvailableCrimeSlot slot, List<AvailableMember> members,
+                                             boolean[] memberUsed, double[][] scoreMatrix,
+                                             int totalFactionMembers, int slotIndex) {
+        int bestMember = -1;
+        double bestScore = -1.0;
+
+        for (int m = 0; m < members.size(); m++) {
+            if (memberUsed[m]) continue;
+
+            AvailableMember member = members.get(m);
+            Integer memberCPR = member.getCPRForSlot(slot.getCrimeName(), slot.getSlotPosition());
+
+            // Apply difficulty restrictions for high-difficulty crimes
+            if (slot.getCrimeDifficulty() != null && slot.getCrimeDifficulty() >= 7) {
+                // For high difficulty crimes, only allow members with CPR >= 60 OR top 25% experience
+                if (memberCPR == null || memberCPR < 60) {
+                    if (!isInTop25Percent(member, totalFactionMembers)) {
+                        logger.info("Skipping member {} for high-difficulty crime {} (difficulty {}): not in top 25% (rank {} of {})",
+                                member.getUsername(), slot.getCrimeName(), slot.getCrimeDifficulty(),
+                                member.getCrimeExpRank(), totalFactionMembers);
+                        continue;
+                    }
+                }
+            }
+
+            double score = scoreMatrix[m][slotIndex];
+            if (score > bestScore) {
+                bestScore = score;
+                bestMember = m;
+            }
+        }
+
+        return bestMember;
     }
 
     /**
@@ -1100,18 +1182,18 @@ public class CrimeAssignmentOptimizer {
         // Check if tables exist first
         try {
             verifyTableExists(ocDataConnection, availableMembersTable, "available members");
-            logger.info("✓ Table {} exists and is accessible", availableMembersTable);
+            logger.info(" Table {} exists and is accessible", availableMembersTable);
         } catch (SQLException e) {
-            logger.error("✗ CRITICAL: Available members table {} does not exist for faction {}: {}",
+            logger.error("  CRITICAL: Available members table {} does not exist for faction {}: {}",
                     availableMembersTable, factionInfo.getFactionId(), e.getMessage());
             throw new SQLException("Available members table missing for faction " + factionInfo.getFactionId(), e);
         }
 
         try {
             verifyTableExists(configConnection, membersTable, "members");
-            logger.info("✓ Table {} exists in CONFIG database", membersTable);
+            logger.info(" Table {} exists in CONFIG database", membersTable);
         } catch (SQLException e) {
-            logger.error("✗ CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
+            logger.error("  CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
                     membersTable, factionInfo.getFactionId(), e.getMessage());
             throw new SQLException("Members table missing in CONFIG database for faction " + factionInfo.getFactionId(), e);
         }
@@ -1145,7 +1227,7 @@ public class CrimeAssignmentOptimizer {
                 members.add(new AvailableMember(userId, username, cprData, lastJoinedCrimeDate, crimeExpRank));
             }
 
-            logger.info("✓ Successfully loaded {} members from table {} for faction {}",
+            logger.info(" Successfully loaded {} members from table {} for faction {}",
                     memberCount, availableMembersTable, factionInfo.getFactionId());
 
             if (memberCount == 0) {
@@ -1154,7 +1236,7 @@ public class CrimeAssignmentOptimizer {
             }
 
         } catch (SQLException e) {
-            logger.error("✗ ERROR: Failed to load available members for faction {} from table {}: {}",
+            logger.error("  ERROR: Failed to load available members for faction {} from table {}: {}",
                     factionInfo.getFactionId(), availableMembersTable, e.getMessage());
             throw e;
         }
@@ -1291,9 +1373,9 @@ public class CrimeAssignmentOptimizer {
         // Check if table exists
         try {
             verifyTableExists(ocDataConnection, availableCrimesTable, "available crimes");
-            logger.info("✓ Table {} exists and is accessible", availableCrimesTable);
+            logger.info(" Table {} exists and is accessible", availableCrimesTable);
         } catch (SQLException e) {
-            logger.error("✗ CRITICAL: Available crimes table {} does not exist for faction {}: {}",
+            logger.error("  CRITICAL: Available crimes table {} does not exist for faction {}: {}",
                     availableCrimesTable, factionInfo.getFactionId(), e.getMessage());
             throw new SQLException("Available crimes table missing for faction " + factionInfo.getFactionId(), e);
         }
@@ -1362,7 +1444,14 @@ public class CrimeAssignmentOptimizer {
                 // Get completion data
                 Integer totalSlots = crimeTotalSlots.getOrDefault(crimeName, 6); // Default to 6 if not found
                 Integer availableSlots = crimeAvailableSlotCounts.getOrDefault(crimeId, 1);
-                Integer filledSlots = totalSlots - availableSlots;
+
+                if (totalSlots < availableSlots) {
+                    logger.warn("SLOT COUNT MISMATCH: Crime {} (ID: {}) - Database says {} total slots but {} are available. Using available count as total.",
+                            crimeName, crimeId, totalSlots, availableSlots);
+                    totalSlots = availableSlots; // Override with available count
+                }
+
+                int filledSlots = totalSlots - availableSlots;
 
                 // Track statistics
                 crimeSlotCounts.merge(crimeName, 1, Integer::sum);
@@ -1393,7 +1482,7 @@ public class CrimeAssignmentOptimizer {
                 }
 
                 if (rowCount <= 5) { // Log first few entries for debugging
-                    logger.info("  Slot {}: {} - {} ({}) - Completion: {}, Priority: {}",
+                    logger.info("  Slot {}: {} - {} - Completion: {}, Priority: {}",
                             rowCount, slot.getCrimeName(), slot.getSlotPosition(),
                             slot.getCompletionStatus(), slot.getCompletionPriority());
                 }
@@ -1416,7 +1505,7 @@ public class CrimeAssignmentOptimizer {
                 return Long.compare(b.getExpectedValue(), a.getExpectedValue());
             });
 
-            logger.info("✓ Successfully loaded {} crime slots with completion data for faction {}",
+            logger.info(" Successfully loaded {} crime slots with completion data for faction {}",
                     rowCount, factionInfo.getFactionId());
 
             // Enhanced logging with completion statistics
@@ -1458,7 +1547,7 @@ public class CrimeAssignmentOptimizer {
             }
 
         } catch (SQLException e) {
-            logger.error("✗ ERROR: Could not load available crime slots for faction {} from table {}: {}",
+            logger.error("  ERROR: Could not load available crime slots for faction {} from table {}: {}",
                     factionInfo.getFactionId(), availableCrimesTable, e.getMessage());
             throw e;
         }
@@ -1508,11 +1597,13 @@ public class CrimeAssignmentOptimizer {
 
             while (rs.next()) {
                 String roleName = rs.getString("role_name");
-                Double weight = rs.getObject("weight", Double.class);
+                // Fix: Get as Number first, then convert to Double
+                Number weight = rs.getObject("weight", Number.class);
 
                 if (roleName != null && weight != null) {
-                    priorities.put(roleName, weight);
-                    logger.info("Loaded role priority: {} = {}", roleName, weight);
+                    Double weightDouble = weight.doubleValue();
+                    priorities.put(roleName, weightDouble);
+                    logger.info("Loaded role priority: {} = {}", roleName, weightDouble);
                 }
             }
         } catch (SQLException e) {
@@ -1645,13 +1736,13 @@ public class CrimeAssignmentOptimizer {
                 if (factionId != null && isValidDbSuffix(dbSuffix)) {
                     factions.add(new FactionInfo(factionId, dbSuffix));
                     validFactions++;
-                    logger.info("✓ Added valid faction {} with suffix {} to processing list", factionId, dbSuffix);
+                    logger.info(" Added valid faction {} with suffix {} to processing list", factionId, dbSuffix);
                 } else {
-                    logger.warn("✗ Skipping invalid faction: factionId={}, dbSuffix={}", factionId, dbSuffix);
+                    logger.warn("  Skipping invalid faction: factionId={}, dbSuffix={}", factionId, dbSuffix);
                 }
             }
 
-            logger.info("✓ Faction loading summary: {} total records, {} valid OC2-enabled factions",
+            logger.info(" Faction loading summary: {} total records, {} valid OC2-enabled factions",
                     totalFactions, validFactions);
         }
 
@@ -1742,7 +1833,7 @@ public class CrimeAssignmentOptimizer {
                 .mapToLong(assignment -> assignment.getSlot().getExpectedValue())
                 .sum();
 
-        logger.info("✓ Generated recommendations for faction {} - {} assignments, total expected value: ${}",
+        logger.info(" Generated recommendations for faction {} - {} assignments, total expected value: ${}",
                 factionInfo.getFactionId(), result.getAssignments().size(), formatCurrency(totalExpectedValue));
 
         return new AssignmentRecommendation(result.getAssignments(), strategicRecommendations,
@@ -1888,7 +1979,7 @@ public class CrimeAssignmentOptimizer {
         try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger);
              Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
 
-            logger.info("✓ Database connections established for Discord notifications");
+            logger.info(" Database connections established for Discord notifications");
 
             List<FactionInfo> factions = getFactionInfo(configConnection);
             if (factions.isEmpty()) {
@@ -1896,7 +1987,7 @@ public class CrimeAssignmentOptimizer {
                 return;
             }
 
-            logger.info("✓ Found {} factions to send Discord notifications to", factions.size());
+            logger.info(" Found {} factions to send Discord notifications to", factions.size());
             for (int i = 0; i < factions.size(); i++) {
                 FactionInfo faction = factions.get(i);
                 logger.info("  {}. Will notify faction: {} (suffix: {})", i + 1, faction.getFactionId(), faction.getDbSuffix());
@@ -1915,11 +2006,11 @@ public class CrimeAssignmentOptimizer {
                     boolean success = sendFactionAssignmentNotification(configConnection, ocDataConnection, factionInfo);
                     if (success) {
                         successfulNotifications++;
-                        logger.info("✓ SUCCESS: Sent Discord assignment notification to faction {}",
+                        logger.info(" SUCCESS: Sent Discord assignment notification to faction {}",
                                 factionInfo.getFactionId());
                     } else {
                         failedNotifications++;
-                        logger.warn("✗ FAILED: Discord assignment notification failed for faction {}",
+                        logger.warn("  FAILED: Discord assignment notification failed for faction {}",
                                 factionInfo.getFactionId());
                     }
 
@@ -1928,7 +2019,7 @@ public class CrimeAssignmentOptimizer {
                 } catch (Exception e) {
                     failedNotifications++;
                     processedCount++;
-                    logger.error("✗ EXCEPTION: Error sending Discord notification to faction {}: {}",
+                    logger.error("  EXCEPTION: Error sending Discord notification to faction {}: {}",
                             factionInfo.getFactionId(), e.getMessage(), e);
                 }
 
@@ -2032,9 +2123,9 @@ public class CrimeAssignmentOptimizer {
         // Check if table exists first
         try {
             verifyTableExists(configConnection, membersTable, "members");
-            logger.info("✓ Table {} exists in CONFIG database", membersTable);
+            logger.info(" Table {} exists in CONFIG database", membersTable);
         } catch (SQLException e) {
-            logger.error("✗ CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
+            logger.error("  CRITICAL: Members table {} does not exist in CONFIG database for faction {}: {}",
                     membersTable, factionInfo.getFactionId(), e.getMessage());
             throw new SQLException("Members table missing in CONFIG database for faction " + factionInfo.getFactionId(), e);
         }
@@ -2068,7 +2159,7 @@ public class CrimeAssignmentOptimizer {
                 }
             }
 
-            logger.info("✓ Discord mapping summary for faction {}: {} total members, {} with Discord IDs",
+            logger.info(" Discord mapping summary for faction {}: {} total members, {} with Discord IDs",
                     factionInfo.getFactionId(), totalMembers, mappingCount);
 
             if (mappingCount == 0 && totalMembers > 0) {
@@ -2080,7 +2171,7 @@ public class CrimeAssignmentOptimizer {
             }
 
         } catch (SQLException e) {
-            logger.error("✗ ERROR: Could not load Discord member mappings for faction {} from table {}: {}",
+            logger.error("  ERROR: Could not load Discord member mappings for faction {} from table {}: {}",
                     factionInfo.getFactionId(), membersTable, e.getMessage());
             throw e;
         }
