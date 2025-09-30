@@ -42,6 +42,7 @@ public class FactionItemTracking {
 
         String createTableSql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
                 "id SERIAL PRIMARY KEY," +
+                "crime_id BIGINT," +  // ADD THIS
                 "crime_name VARCHAR(255) NOT NULL," +
                 "log_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "user_id VARCHAR(20)," +
@@ -49,8 +50,8 @@ public class FactionItemTracking {
                 "item_name VARCHAR(255) NOT NULL," +
                 "item_price BIGINT," +
                 "faction_purchased BOOLEAN," +
-                "faction_paid_member VARCHAR(20)," + // NULL, 'PENDING', or 'FULFILLED'
-                "payment_request_id VARCHAR(36)," +   // Links to payment_requests table
+                "faction_paid_member VARCHAR(20)," +
+                "payment_request_id VARCHAR(36)," +
                 "notes TEXT," +
                 "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                 ")";
@@ -58,7 +59,16 @@ public class FactionItemTracking {
         try (Statement stmt = ocDataConnection.createStatement()) {
             stmt.execute(createTableSql);
 
+            // Add crime_id column if it doesn't exist (for existing tables)
+            try {
+                stmt.execute("ALTER TABLE " + tableName + " ADD COLUMN IF NOT EXISTS crime_id BIGINT");
+                logger.debug("Added crime_id column to {} if it didn't exist", tableName);
+            } catch (SQLException e) {
+                logger.debug("crime_id column may already exist in {}: {}", tableName, e.getMessage());
+            }
+
             // Create indexes for better performance
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_crime_id ON " + tableName + "(crime_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_crime_name ON " + tableName + "(crime_name)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_log_date ON " + tableName + "(log_date DESC)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_user_id ON " + tableName + "(user_id)");
@@ -73,57 +83,65 @@ public class FactionItemTracking {
     /**
      * Log faction item purchase requirement (from CheckUsersHaveItems)
      */
-    /**
-     * Log faction item purchase requirement (from CheckUsersHaveItems)
-     */
-    public static void logFactionPurchaseRequired(Connection ocDataConnection, String factionSuffix, String userId, String username,
-                                                  String crimeName, String itemName, Long itemPrice) throws SQLException {
+    public static void logFactionPurchaseRequired(Connection ocDataConnection, String factionSuffix,
+                                                  String userId, String username,
+                                                  Long crimeId, String crimeName,  // ADD crimeId parameter
+                                                  String itemName, Long itemPrice) throws SQLException {
         String tableName = "item_tracking_" + factionSuffix;
 
-        // Create table if it doesn't exist
         createItemTrackingTable(ocDataConnection, factionSuffix);
 
-        // CHECK FOR EXISTING ENTRY - ADD THIS
+        // Check for existing entry using crime_id
         String checkSql = "SELECT COUNT(*) FROM " + tableName + " " +
-                "WHERE user_id = ? AND item_name = ? AND crime_name = ? " +
-                "AND faction_purchased = TRUE " +
-                "AND log_date > CURRENT_TIMESTAMP - INTERVAL '24 hours'";
+                "WHERE user_id = ? " +
+                "AND item_name = ? " +
+                "AND crime_id = ? " +
+                "AND faction_purchased = TRUE";
 
         try (PreparedStatement checkStmt = ocDataConnection.prepareStatement(checkSql)) {
             checkStmt.setString(1, userId);
             checkStmt.setString(2, itemName);
-            checkStmt.setString(3, crimeName);
+            if (crimeId != null) {
+                checkStmt.setLong(3, crimeId);
+            } else {
+                checkStmt.setNull(3, Types.BIGINT);
+            }
 
             try (ResultSet rs = checkStmt.executeQuery()) {
                 if (rs.next() && rs.getInt(1) > 0) {
-                    logger.debug("Duplicate faction purchase entry already exists for {} needing {} in crime {} - skipping",
-                            username, itemName, crimeName);
-                    return; // Don't create duplicate
+                    logger.debug("Entry already exists for {} needing {} in crime {} [{}] - skipping",
+                            username, itemName, crimeName, crimeId);
+                    return;
                 }
             }
         }
 
-        // Original insert code continues...
+        // Insert with crime_id
         String insertSql = "INSERT INTO " + tableName + " (" +
-                "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
+                "crime_id, crime_name, user_id, username, item_name, item_price, faction_purchased, " +
                 "faction_paid_member, notes, last_updated) " +
-                "VALUES (?, ?, ?, ?, ?, TRUE, NULL, ?, CURRENT_TIMESTAMP)";
+                "VALUES (?, ?, ?, ?, ?, ?, TRUE, NULL, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
-            pstmt.setString(1, crimeName);
-            pstmt.setString(2, userId);
-            pstmt.setString(3, username);
-            pstmt.setString(4, itemName);
-            if (itemPrice != null) {
-                pstmt.setLong(5, itemPrice);
+            if (crimeId != null) {
+                pstmt.setLong(1, crimeId);
             } else {
-                pstmt.setNull(5, Types.BIGINT);
+                pstmt.setNull(1, Types.BIGINT);
             }
-            pstmt.setString(6, "Faction Purchase");
+            pstmt.setString(2, crimeName);
+            pstmt.setString(3, userId);
+            pstmt.setString(4, username);
+            pstmt.setString(5, itemName);
+            if (itemPrice != null) {
+                pstmt.setLong(6, itemPrice);
+            } else {
+                pstmt.setNull(6, Types.BIGINT);
+            }
+            pstmt.setString(7, "Faction Purchase");
 
             pstmt.executeUpdate();
-            logger.debug("Logged faction purchase requirement: {} for user {} in crime {} (price: ${})",
-                    itemName, username, crimeName, itemPrice);
+            logger.debug("Logged faction purchase requirement: {} for user {} in crime {} [{}] (price: ${})",
+                    itemName, username, crimeName, crimeId, itemPrice);
         }
     }
 
@@ -168,54 +186,64 @@ public class FactionItemTracking {
     public static void logItemTransferRequest(Connection ocDataConnection, String factionSuffix,
                                               String fromUserId, String fromUsername,
                                               String toUserId, String toUsername,
-                                              String crimeName, String itemName, Long itemValue) throws SQLException {
+                                              Long crimeId, String crimeName,  // ADD crimeId parameter
+                                              String itemName, Long itemValue) throws SQLException {
         String tableName = "item_tracking_" + factionSuffix;
 
-        // Create table if it doesn't exist
         createItemTrackingTable(ocDataConnection, factionSuffix);
 
-        // ADD DUPLICATE CHECK
+        // Check for existing transfer request
         String checkSql = "SELECT COUNT(*) FROM " + tableName + " " +
-                "WHERE user_id = ? AND item_name = ? AND crime_name = ? " +
+                "WHERE user_id = ? " +
+                "AND item_name = ? " +
+                "AND crime_id = ? " +
                 "AND faction_purchased = FALSE " +
-                "AND notes LIKE ? " +
-                "AND log_date > CURRENT_TIMESTAMP - INTERVAL '24 hours'";
+                "AND notes LIKE ?";
 
         try (PreparedStatement checkStmt = ocDataConnection.prepareStatement(checkSql)) {
             checkStmt.setString(1, toUserId);
             checkStmt.setString(2, itemName);
-            checkStmt.setString(3, crimeName);
+            if (crimeId != null) {
+                checkStmt.setLong(3, crimeId);
+            } else {
+                checkStmt.setNull(3, Types.BIGINT);
+            }
             checkStmt.setString(4, "Item requested from " + fromUsername + " [" + fromUserId + "]");
 
             try (ResultSet rs = checkStmt.executeQuery()) {
                 if (rs.next() && rs.getInt(1) > 0) {
-                    logger.debug("Duplicate transfer request already exists from {} to {} for {} - skipping",
-                            fromUsername, toUsername, itemName);
+                    logger.debug("Duplicate transfer request already exists from {} to {} for {} in crime {} - skipping",
+                            fromUsername, toUsername, itemName, crimeId);
                     return;
                 }
             }
         }
 
         String insertSql = "INSERT INTO " + tableName + " (" +
-                "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
+                "crime_id, crime_name, user_id, username, item_name, item_price, faction_purchased, " +
                 "faction_paid_member, notes, last_updated) " +
-                "VALUES (?, ?, ?, ?, ?, FALSE, NULL, ?, CURRENT_TIMESTAMP)";
+                "VALUES (?, ?, ?, ?, ?, ?, FALSE, NULL, ?, CURRENT_TIMESTAMP)";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
-            pstmt.setString(1, crimeName);
-            pstmt.setString(2, toUserId); // The user who needs the item
-            pstmt.setString(3, toUsername);
-            pstmt.setString(4, itemName);
-            if (itemValue != null) {
-                pstmt.setLong(5, itemValue);
+            if (crimeId != null) {
+                pstmt.setLong(1, crimeId);
             } else {
-                pstmt.setNull(5, Types.BIGINT);
+                pstmt.setNull(1, Types.BIGINT);
             }
-            pstmt.setString(6, "Item requested from " + fromUsername + " [" + fromUserId + "]");
+            pstmt.setString(2, crimeName);
+            pstmt.setString(3, toUserId);
+            pstmt.setString(4, toUsername);
+            pstmt.setString(5, itemName);
+            if (itemValue != null) {
+                pstmt.setLong(6, itemValue);
+            } else {
+                pstmt.setNull(6, Types.BIGINT);
+            }
+            pstmt.setString(7, "Item requested from " + fromUsername + " [" + fromUserId + "]");
 
             pstmt.executeUpdate();
-            logger.debug("Logged item transfer request: {} from {} to {} for crime {} (value: ${})",
-                    itemName, fromUsername, toUsername, crimeName, itemValue);
+            logger.debug("Logged item transfer request: {} from {} to {} for crime {} [{}] (value: ${})",
+                    itemName, fromUsername, toUsername, crimeName, crimeId, itemValue);
         }
     }
 

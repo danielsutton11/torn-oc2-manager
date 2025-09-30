@@ -92,16 +92,18 @@ public class CheckUsersHaveItems {
         private final String toUsername;
         private final String itemName;
         private final String crimeName;
+        private final Long crimeId;
         private final long itemValue;
 
         public ItemTransferRequest(String fromUserId, String fromUsername, String toUserId,
-                                   String toUsername, String itemName, String crimeName, long itemValue) {
+                                   String toUsername, String itemName, String crimeName, long crimeId, long itemValue) {
             this.fromUserId = fromUserId;
             this.fromUsername = fromUsername;
             this.toUserId = toUserId;
             this.toUsername = toUsername;
             this.itemName = itemName;
             this.crimeName = crimeName;
+            this.crimeId = crimeId;
             this.itemValue = itemValue;
         }
 
@@ -110,6 +112,7 @@ public class CheckUsersHaveItems {
         public String getToUserId() { return toUserId; }
         public String getToUsername() { return toUsername; }
         public String getItemName() { return itemName; }
+        public Long getCrimeId() { return crimeId; }
         public String getCrimeName() { return crimeName; }
         public long getItemValue() { return itemValue; }
     }
@@ -271,6 +274,7 @@ public class CheckUsersHaveItems {
                                 request.getUsername(),
                                 request.getItemRequired(),
                                 request.getCrimeName(),
+                                request.getCrimeId(),
                                 request.getItemAveragePrice().longValue()
                         ));
 
@@ -306,6 +310,7 @@ public class CheckUsersHaveItems {
                             factionInfo.getDbSuffix(),
                             request.getUserId(),
                             request.getUsername(),
+                            request.getCrimeId(),
                             request.getCrimeName(),
                             request.getItemRequired(),
                             request.getItemAveragePrice() != null ? request.getItemAveragePrice().longValue() : null
@@ -518,6 +523,7 @@ public class CheckUsersHaveItems {
                                     request.getFromUsername(),
                                     request.getToUserId(),
                                     request.getToUsername(),
+                                    request.getCrimeId(),
                                     request.getCrimeName(),
                                     request.getItemName(),
                                     request.getItemValue()
