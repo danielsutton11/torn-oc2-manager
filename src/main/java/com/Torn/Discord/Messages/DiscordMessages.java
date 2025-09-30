@@ -349,7 +349,7 @@ public class DiscordMessages {
         }
 
         // Build quick actions
-        String quickActions = "🏪 [**Items**](https://www.torn.com/page.php?sid=ItemMarket) - Go to your items\n\n" +
+        String quickActions = "🏪 [**Items**](https://www.torn.com/item.php) - Go to your items\n\n" +
                 "📤 [**Trade**](https://www.torn.com/trade.php#step=start) - Send items to other users\n";
 
         DiscordEmbed embed = new DiscordEmbed()
@@ -365,13 +365,17 @@ public class DiscordMessages {
                 .setTimestamp(java.time.Instant.now().toString());
 
         String messageContent = null;
-        try {
-            messageContent = getOCManagerMention(factionId) +
-                    " Some users are not in Discord, please message them directly.";
-        } catch (Exception e) {
-            logger.warn("Could not get OC Manager mention for faction {}: {}",
-                    factionId, e.getMessage());
-            messageContent = "Some users are not in Discord, please message them directly.";
+
+        if (sendToArmourer) {
+            // Some users are not in Discord - tag OC managers
+            try {
+                messageContent = getOCManagerMention(factionId) +
+                        " Some users are not in Discord, please message them directly.";
+            } catch (Exception e) {
+                logger.warn("Could not get OC Manager mention for faction {}: {}",
+                        factionId, e.getMessage());
+                messageContent = "Some users are not in Discord, please message them directly.";
+            }
         }
 
         // Build message content to mention users

@@ -250,7 +250,7 @@ public class CheckUsersHaveItems {
                 return CheckItemsResult.success(0, 0, false, false);
             }
 
-// Separate high-value reusable items from regular item requests
+            // Separate high-value reusable items from regular item requests
             List<UserItemRequest> regularItemRequests = new ArrayList<>();
             List<ItemTransferRequest> transferRequests = new ArrayList<>();
 
@@ -281,11 +281,15 @@ public class CheckUsersHaveItems {
                         logger.info("Created transfer request: {} should send {} to {} for crime {}",
                                 lastUser.getUsername(), request.getItemRequired(), request.getUsername(), request.getCrimeName());
                     } else {
-                        // Previous user still using it OR no previous user found
-                        // Don't add to regularItemRequests - just skip it entirely
-                        logger.info("Skipping high-value item {} - previous user still using it or no transfer available",
-                                request.getItemRequired());
-                        // Do NOT add to regularItemRequests
+                        // No available user to transfer from, treat as regular request
+                        regularItemRequests.add(request);
+                        if (lastUser == null) {
+                            logger.info("No previous user found for high-value item {} - adding to regular purchase requests",
+                                    request.getItemRequired());
+                        } else {
+                            logger.info("Previous user {} still using item {} - adding to regular purchase requests",
+                                    lastUser.getUsername(), request.getItemRequired());
+                        }
                     }
                 } else {
                     // Regular item request (non-reusable or below threshold)
