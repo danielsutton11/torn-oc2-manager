@@ -578,7 +578,15 @@ public class CheckUsersHaveItems {
                 " WHERE " + Constants.COLUMN_NAME_FACTION_ID + " = ?";
 
         try (PreparedStatement pstmt = configConnection.prepareStatement(sql)) {
-            pstmt.setString(1, factionId);
+            // FIX: Try to parse as Long first, fall back to String
+            try {
+                long factionIdLong = Long.parseLong(factionId);
+                pstmt.setLong(1, factionIdLong);
+            } catch (NumberFormatException e) {
+                // If it's not a valid long, try as string (shouldn't happen but safe fallback)
+                pstmt.setString(1, factionId);
+            }
+
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString(Constants.COLUMN_NAME_DB_SUFFIX);
