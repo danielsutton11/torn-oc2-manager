@@ -83,6 +83,27 @@ public class FactionItemTracking {
         // Create table if it doesn't exist
         createItemTrackingTable(ocDataConnection, factionSuffix);
 
+        // CHECK FOR EXISTING ENTRY - ADD THIS
+        String checkSql = "SELECT COUNT(*) FROM " + tableName + " " +
+                "WHERE user_id = ? AND item_name = ? AND crime_name = ? " +
+                "AND faction_purchased = TRUE " +
+                "AND log_date > CURRENT_TIMESTAMP - INTERVAL '24 hours'";
+
+        try (PreparedStatement checkStmt = ocDataConnection.prepareStatement(checkSql)) {
+            checkStmt.setString(1, userId);
+            checkStmt.setString(2, itemName);
+            checkStmt.setString(3, crimeName);
+
+            try (ResultSet rs = checkStmt.executeQuery()) {
+                if (rs.next() && rs.getInt(1) > 0) {
+                    logger.debug("Duplicate faction purchase entry already exists for {} needing {} in crime {} - skipping",
+                            username, itemName, crimeName);
+                    return; // Don't create duplicate
+                }
+            }
+        }
+
+        // Original insert code continues...
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
                 "faction_paid_member, notes, last_updated) " +
@@ -98,7 +119,7 @@ public class FactionItemTracking {
             } else {
                 pstmt.setNull(5, Types.BIGINT);
             }
-            pstmt.setString(6, "Faction Purchase"); // Fixed: More descriptive note
+            pstmt.setString(6, "Faction Purchase");
 
             pstmt.executeUpdate();
             logger.debug("Logged faction purchase requirement: {} for user {} in crime {} (price: ${})",
@@ -152,6 +173,28 @@ public class FactionItemTracking {
 
         // Create table if it doesn't exist
         createItemTrackingTable(ocDataConnection, factionSuffix);
+
+        // ADD DUPLICATE CHECK
+        String checkSql = "SELECT COUNT(*) FROM " + tableName + " " +
+                "WHERE user_id = ? AND item_name = ? AND crime_name = ? " +
+                "AND faction_purchased = FALSE " +
+                "AND notes LIKE ? " +
+                "AND log_date > CURRENT_TIMESTAMP - INTERVAL '24 hours'";
+
+        try (PreparedStatement checkStmt = ocDataConnection.prepareStatement(checkSql)) {
+            checkStmt.setString(1, toUserId);
+            checkStmt.setString(2, itemName);
+            checkStmt.setString(3, crimeName);
+            checkStmt.setString(4, "Item requested from " + fromUsername + " [" + fromUserId + "]");
+
+            try (ResultSet rs = checkStmt.executeQuery()) {
+                if (rs.next() && rs.getInt(1) > 0) {
+                    logger.debug("Duplicate transfer request already exists from {} to {} for {} - skipping",
+                            fromUsername, toUsername, itemName);
+                    return;
+                }
+            }
+        }
 
         String insertSql = "INSERT INTO " + tableName + " (" +
                 "crime_name, user_id, username, item_name, item_price, faction_purchased, " +

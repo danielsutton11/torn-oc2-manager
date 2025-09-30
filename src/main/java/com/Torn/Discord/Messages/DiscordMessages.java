@@ -230,13 +230,15 @@ public class DiscordMessages {
         private final String itemId;
         private final String itemName;
         private final String requestId;
+        private final Long itemPrice;
 
-        public ItemRequest(String userId, String username, String itemId, String itemName, String requestId) {
+        public ItemRequest(String userId, String username, String itemId, String itemName, String requestId, Long itemPrice) {
             this.userId = userId;
             this.username = username;
             this.itemId = itemId;
             this.itemName = itemName;
             this.requestId = requestId;
+            this.itemPrice = itemPrice;
         }
 
         // Getters
@@ -245,30 +247,64 @@ public class DiscordMessages {
         public String getItemId() { return itemId; }
         public String getItemName() { return itemName; }
         public String getRequestId() { return requestId; }
+        public Long getItemPrice() { return itemPrice; }
     }
 
     public static boolean sendArmourerGetItems(String factionId, List<ItemRequest> itemRequests) {
+
+        // Calculate total cost
+        long totalCost = 0;
+        int itemsWithPrice = 0;
+        int itemsWithoutPrice = 0;
+
+        for (ItemRequest request : itemRequests) {
+            if (request.getItemPrice() != null && request.getItemPrice() > 0) {
+                totalCost += request.getItemPrice();
+                itemsWithPrice++;
+            } else {
+                itemsWithoutPrice++;
+            }
+        }
 
         // Build dynamic description
         StringBuilder description = new StringBuilder();
         description.append("The following users require the following items to complete their organised crimes:\n\n");
 
         for (ItemRequest request : itemRequests) {
-            description.append(String.format("**%s [%s]** needs %s\n",
+            description.append(String.format("**%s [%s]** needs %s",
                     request.getUsername(),
                     request.getUserId(),
                     request.getItemName()
             ));
+            description.append("\n");
         }
 
         // Build dynamic quick actions for unique items
         StringBuilder quickActions = getStringBuilder(itemRequests);
+
+        // Build cost summary
+        String costSummary;
+        if (itemsWithoutPrice == 0) {
+            // All items have pricing
+            costSummary = String.format("**%s**", formatCurrency(totalCost));
+        } else if (itemsWithPrice == 0) {
+            // No items have pricing
+            costSummary = "**Pricing data unavailable**";
+        } else {
+            // Mixed
+            costSummary = String.format("**≈%s** (estimate based on %d/%d items)",
+                    formatCurrency(totalCost), itemsWithPrice, itemRequests.size());
+        }
 
         DiscordEmbed embed = new DiscordEmbed()
                 .setTitle("🔫 OC2 Items Required")
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
                 .addField("__Quick Actions__", "\n\n\n" + quickActions, false)
+                .addField("💰 Estimated Total Cost",
+                        String.format("**%s**\n(%d items with pricing data, %d without)",
+                                costSummary, itemsWithPrice, itemsWithoutPrice),
+                        false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
@@ -489,9 +525,9 @@ public class DiscordMessages {
                     // User not in Discord - use plain username and track them
                     usersNotInDiscord.add(username);
 
-                    description.append(String.format("• **%s** → **%s** *(not in Discord)*\n",
+                    description.append(String.format("• **%s** → **%s** *(not in Discord) - [Send Mail](https://www.torn.com/messages.php#/p=compose&XID=%s)*\n",
                             assignment.getSlot().getSlotPosition(),
-                            username));
+                            username,userId));
                 }
             }
             description.append("\n");

@@ -247,7 +247,7 @@ public class CheckUsersHaveItems {
                 return CheckItemsResult.success(0, 0, false, false);
             }
 
-            // Separate high-value reusable items from regular item requests
+// Separate high-value reusable items from regular item requests
             List<UserItemRequest> regularItemRequests = new ArrayList<>();
             List<ItemTransferRequest> transferRequests = new ArrayList<>();
 
@@ -257,9 +257,12 @@ public class CheckUsersHaveItems {
                         request.getItemAveragePrice() > Constants.ITEM_TRANSFER_THRESHOLD) {
 
                     // High-value reusable item - check for potential transfer
-                    LastItemUser lastUser = getLastUserWithItem(ocDataConnection, factionInfo.getDbSuffix(), request.getItemRequired());
+                    // Pass the current user's ID to exclude them from the search
+                    LastItemUser lastUser = getLastUserWithItem(ocDataConnection, factionInfo.getDbSuffix(),
+                            request.getItemRequired(), request.getUserId());
 
-                    if (lastUser != null && !isUserCurrentlyUsingItem(ocDataConnection, overviewTableName, lastUser.getUserId(), request.getItemRequired())) {
+                    if (lastUser != null && !isUserCurrentlyUsingItem(ocDataConnection, overviewTableName,
+                            lastUser.getUserId(), request.getItemRequired())) {
                         // Create transfer request
                         transferRequests.add(new ItemTransferRequest(
                                 lastUser.getUserId(),
@@ -274,9 +277,11 @@ public class CheckUsersHaveItems {
                         logger.info("Created transfer request: {} should send {} to {} for crime {}",
                                 lastUser.getUsername(), request.getItemRequired(), request.getUsername(), request.getCrimeName());
                     } else {
-                        // No available user to transfer from, treat as regular request
-                        regularItemRequests.add(request);
-                        logger.debug("No available transfer for high-value item {}, adding to regular requests", request.getItemRequired());
+                        // Previous user still using it OR no previous user found
+                        // Don't add to regularItemRequests - just skip it entirely
+                        logger.info("Skipping high-value item {} - previous user still using it or no transfer available",
+                                request.getItemRequired());
+                        // Do NOT add to regularItemRequests
                     }
                 } else {
                     // Regular item request (non-reusable or below threshold)
@@ -391,17 +396,21 @@ public class CheckUsersHaveItems {
     /**
      * Get the last user who needed a specific item from the tracking table
      */
-    private static LastItemUser getLastUserWithItem(Connection ocDataConnection, String dbSuffix, String itemName) {
+    private static LastItemUser getLastUserWithItem(Connection ocDataConnection, String dbSuffix,
+                                                    String itemName, String excludeUserId) {
         String trackingTableName = "item_tracking_" + dbSuffix;
 
         String sql = "SELECT user_id, username, item_name " +
                 "FROM " + trackingTableName + " " +
-                "WHERE item_name = ? AND faction_purchased = true " +
+                "WHERE item_name = ? " +
+                "AND faction_purchased = true " +
+                "AND user_id != ? " +  // Exclude the current requester
                 "ORDER BY log_date DESC " +
                 "LIMIT 1";
 
         try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql)) {
             pstmt.setString(1, itemName);
+            pstmt.setString(2, excludeUserId);
 
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
@@ -409,13 +418,15 @@ public class CheckUsersHaveItems {
                     String username = rs.getString("username");
                     String returnedItemName = rs.getString("item_name");
 
-                    logger.debug("Found last user {} ({}) who had item {}", username, userId, itemName);
+                    logger.debug("Found last user {} ({}) who had item {} (excluding {})",
+                            username, userId, itemName, excludeUserId);
                     return new LastItemUser(userId, username, returnedItemName);
                 }
             }
 
         } catch (SQLException e) {
-            logger.debug("Could not query tracking table {} for item {}: {}", trackingTableName, itemName, e.getMessage());
+            logger.debug("Could not query tracking table {} for item {}: {}",
+                    trackingTableName, itemName, e.getMessage());
         }
 
         logger.debug("No previous user found for item {} in tracking table {}", itemName, trackingTableName);
@@ -643,9 +654,10 @@ public class CheckUsersHaveItems {
             DiscordMessages.ItemRequest discordRequest = new DiscordMessages.ItemRequest(
                     request.getUserId(),
                     request.getUsername(),
-                    itemId, // Use looked-up item ID
+                    itemId,
                     request.getItemRequired(),
-                    requestId
+                    requestId,
+                    request.getItemAveragePrice() != null ? request.getItemAveragePrice().longValue() : null
             );
 
             discordRequests.add(discordRequest);
