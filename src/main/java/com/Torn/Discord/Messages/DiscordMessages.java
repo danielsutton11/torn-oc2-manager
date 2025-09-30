@@ -301,10 +301,7 @@ public class DiscordMessages {
                 .setDescription(description.toString())
                 .setColor(Colors.RED)
                 .addField("__Quick Actions__", "\n\n\n" + quickActions, false)
-                .addField("💰 Estimated Total Cost",
-                        String.format("**%s**\n(%d items with pricing data, %d without)",
-                                costSummary, itemsWithPrice, itemsWithoutPrice),
-                        false)
+                .addField("💰 Estimated Total Cost", "\n\n\n" + costSummary, false)
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
