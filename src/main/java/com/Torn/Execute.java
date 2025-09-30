@@ -147,7 +147,7 @@ public class Execute {
                     logger.info("Running available crimes check job");
                     fetchAndProcessAllAvailableCrimes();
                     fetchAndProcessAllAvailableMembers();
-                    sendDiscordAssignmentNotifications();
+                    //sendDiscordAssignmentNotifications();
                     break;
 
                 default:

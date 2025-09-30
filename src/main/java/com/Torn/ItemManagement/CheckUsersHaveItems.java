@@ -478,6 +478,9 @@ public class CheckUsersHaveItems {
             return true;
         }
 
+        logger.info("=== STARTING TRANSFER NOTIFICATIONS ===");
+        logger.info("Processing {} transfer requests for faction {}", transferRequests.size(), factionId);
+
         try {
             // Get database connection for Discord mappings and item tracking
             String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
@@ -498,8 +501,11 @@ public class CheckUsersHaveItems {
                     return false;
                 }
 
+                logger.info("Loaded faction suffix: {}", factionSuffix);
+
                 // Get Discord mappings for both sender and receiver
                 Map<String, String> discordMentions = getDiscordMentions(configConnection, factionSuffix, transferRequests);
+                logger.info("Loaded {} Discord mentions for transfer notifications", discordMentions.size());
 
                 // Group transfer requests by item to avoid spam
                 Map<String, List<ItemTransferRequest>> requestsByItem = new HashMap<>();
@@ -507,15 +513,22 @@ public class CheckUsersHaveItems {
                     requestsByItem.computeIfAbsent(request.getItemName(), k -> new ArrayList<>()).add(request);
                 }
 
+                logger.info("Grouped into {} unique item types", requestsByItem.size());
+
                 boolean allSuccessful = true;
 
                 for (Map.Entry<String, List<ItemTransferRequest>> entry : requestsByItem.entrySet()) {
                     String itemName = entry.getKey();
                     List<ItemTransferRequest> requests = entry.getValue();
 
+                    logger.info("Processing item: {} with {} transfer requests", itemName, requests.size());
+
                     // Update item tracking for each transfer request
                     for (ItemTransferRequest request : requests) {
                         try {
+                            logger.info("Logging transfer: {} -> {} for item {}",
+                                    request.getFromUsername(), request.getToUsername(), itemName);
+
                             FactionItemTracking.logItemTransferRequest(
                                     ocDataConnection,
                                     factionSuffix,
@@ -528,19 +541,26 @@ public class CheckUsersHaveItems {
                                     request.getItemName(),
                                     request.getItemValue()
                             );
+
+                            logger.info("Successfully logged transfer request for {}", itemName);
                         } catch (Exception e) {
                             logger.warn("Failed to log transfer request for item {}: {}",
                                     itemName, e.getMessage());
                         }
                     }
 
+                    logger.info("Sending Discord transfer notification for item: {}", itemName);
                     boolean success = DiscordMessages.sendItemTransferRequests(factionId, itemName, requests, discordMentions);
-                    if (!success) {
+
+                    if (success) {
+                        logger.info("✓ Successfully sent Discord transfer notification for item {}", itemName);
+                    } else {
                         allSuccessful = false;
-                        logger.error("Failed to send transfer notification for item {} in faction {}", itemName, factionId);
+                        logger.error("✗ Failed to send transfer notification for item {} in faction {}", itemName, factionId);
                     }
                 }
 
+                logger.info("=== TRANSFER NOTIFICATIONS COMPLETE: {} ===", allSuccessful ? "SUCCESS" : "FAILURE");
                 return allSuccessful;
             }
 

@@ -1597,13 +1597,14 @@ public class CrimeAssignmentOptimizer {
 
             while (rs.next()) {
                 String roleName = rs.getString("role_name");
-                // Fix: Get as Number first, then convert to Double
-                Number weight = rs.getObject("weight", Number.class);
 
-                if (roleName != null && weight != null) {
-                    Double weightDouble = weight.doubleValue();
-                    priorities.put(roleName, weightDouble);
-                    logger.info("Loaded role priority: {} = {}", roleName, weightDouble);
+                // This works for int4, float8, numeric, etc.
+                double weightValue = rs.getDouble("weight");
+
+                if (roleName != null && !rs.wasNull()) {
+                    Double weight = weightValue;
+                    priorities.put(roleName, weight);
+                    logger.info("Loaded role priority: {} = {}", roleName, weight);
                 }
             }
         } catch (SQLException e) {
