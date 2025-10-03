@@ -243,13 +243,23 @@ public class PaymentVerificationService {
             List<PaymentRequest> claimedRequests = PaymentRequestDAO.getClaimedRequestsForFaction(
                     connection, faction.getFactionId());
 
-            if (claimedRequests.isEmpty()) {
-                logger.debug("No claimed requests to verify for faction {}", faction.getFactionId());
+            // Also get pending requests to catch payments made without claiming
+            List<PaymentRequest> pendingRequests = PaymentRequestDAO.getPendingRequestsForFaction(
+                    connection, faction.getFactionId());
+
+            // Combine both lists
+            List<PaymentRequest> allRequests = new ArrayList<>();
+            allRequests.addAll(claimedRequests);
+            allRequests.addAll(pendingRequests);
+
+            if (allRequests.isEmpty()) {
+                logger.debug("No requests to verify for faction {}", faction.getFactionId());
                 return 0;
             }
 
-            logger.debug("Checking {} claimed requests for faction {} ({})",
-                    claimedRequests.size(), faction.getFactionId(), faction.getOwnerName());
+            logger.debug("Checking {} requests ({} claimed, {} pending) for faction {} ({})",
+                    allRequests.size(), claimedRequests.size(), pendingRequests.size(),
+                    faction.getFactionId(), faction.getOwnerName());
 
             // Fetch faction news for depositFunds category
             String apiUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
@@ -283,7 +293,7 @@ public class PaymentVerificationService {
 
                 if (depositInfo != null) {
                     // Check if this deposit matches any claimed request
-                    for (PaymentRequest request : claimedRequests) {
+                    for (PaymentRequest request : allRequests) {
                         if (doesDepositMatchRequest(depositInfo, request, timestamp)) {
                             // Mark request as fulfilled
                             boolean success = PaymentRequestDAO.fulfillPaymentRequest(

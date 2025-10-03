@@ -190,7 +190,7 @@ public class PaymentRequestDAO {
                 "fulfilment_method = ?, " +
                 "payment_news_id = ?, " +
                 "last_updated = CURRENT_TIMESTAMP " +
-                "WHERE request_id = ? AND status = 'CLAIMED'";
+                "WHERE request_id = ? AND status IN ('CLAIMED','PENDING')";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, method);
