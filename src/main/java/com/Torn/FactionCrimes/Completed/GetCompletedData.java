@@ -51,7 +51,7 @@ public class GetCompletedData {
     private static final int MAX_PAGES_INCREMENTAL = 10; // For incremental updates
 
     //Default look back time for incremental updates (can be overridden by environment variables)
-    private static final int DEFAULT_INCREMENTAL_MINUTES = 60; // Default 60 minutes for incremental
+    private static final int DEFAULT_INCREMENTAL_MINUTES = 120; // Default 60 minutes for incremental
 
     public static class FactionInfo {
         private final String factionId;
