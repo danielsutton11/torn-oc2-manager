@@ -528,7 +528,7 @@ public class DiscordMessages {
 
                     description.append(String.format("• **%s** → **%s** *(not in Discord) - [Send Mail](https://www.torn.com/messages.php#/p=compose&XID=%s)*\n",
                             assignment.getSlot().getSlotPosition(),
-                            username,userId));
+                            username, userId));
                 }
             }
             description.append("\n");
@@ -539,6 +539,7 @@ public class DiscordMessages {
             return true;
         }
 
+        // Build the embed message
         SendDiscordMessage.DiscordEmbed embed = new SendDiscordMessage.DiscordEmbed()
                 .setTitle("🎯 OC2 Crime & Role Assignments")
                 .setDescription(description.toString())
@@ -546,25 +547,39 @@ public class DiscordMessages {
                 .setFooter("OC2 Management System", null)
                 .setTimestamp(java.time.Instant.now().toString());
 
-        // Determine message content based on whether there are users not in Discord
-        String messageContent = null;
+        // Build the notification message with all mentions
+        StringBuilder notificationMessage = new StringBuilder();
 
+        // Add all user mentions for notifications
+        if (!mentionedUsers.isEmpty()) {
+            notificationMessage.append(String.join(" ", mentionedUsers));
+        }
+
+        // Add OC manager mention if there are users not in Discord
         if (!usersNotInDiscord.isEmpty()) {
-            // Some users are not in Discord - tag OC managers
             try {
-                messageContent = getOCManagerMention(factionInfo.getFactionId()) +
-                        " Some users are not in Discord, please message them directly.";
+                String ocManagerMention = getOCManagerMention(factionInfo.getFactionId());
+                if (notificationMessage.length() > 0) {
+                    notificationMessage.append(" ");
+                }
+                notificationMessage.append(ocManagerMention)
+                        .append(" Some users are not in Discord, please message them directly.");
             } catch (Exception e) {
                 logger.warn("Could not get OC Manager mention for faction {}: {}",
                         factionInfo.getFactionId(), e.getMessage());
-                messageContent = "Some users are not in Discord, please message them directly.";
+                if (notificationMessage.length() > 0) {
+                    notificationMessage.append(" ");
+                }
+                notificationMessage.append("Some users are not in Discord, please message them directly.");
             }
         }
-        // If all users are in Discord, messageContent stays null (no extra message)
+
+        // Send the notification message (if there are any mentions)
+        String finalNotificationMessage = notificationMessage.length() > 0 ? notificationMessage.toString() : null;
 
         return SendDiscordMessage.sendMessageNoRole(
                 factionInfo.getFactionId(),
-                messageContent,
+                finalNotificationMessage,
                 embed,
                 "OC2 Manager"
         );
