@@ -124,6 +124,12 @@ public class ValidateApiKeys {
         }
     }
 
+    /**
+     * ENHANCED VERSION: Validate API key AND verify faction membership
+     * Makes two API calls:
+     * 1. Test the key works (/v2/faction/crimes)
+     * 2. Verify key owner's faction (/v2/key/info)
+     */
     private static ValidationResult validateApiKeyRobust(ApiKeyInfo apiKeyInfo, Connection connection) throws SQLException {
         String apiKey = apiKeyInfo.getApiKey();
         String factionId = apiKeyInfo.getFactionId();
@@ -136,20 +142,83 @@ public class ValidateApiKeys {
 
         logger.debug("Validating API key: {} for faction: {}", maskedKey, factionId);
 
-        // Use the robust API handler
+        // Step 1: Test if the key works at all
         ApiResponse response = TornApiHandler.executeRequest(Constants.API_URL_FACTION_CRIMES, apiKey);
+        ValidationResult basicResult = processApiResponse(response, maskedKey, factionId);
 
-        // Handle different response types
-        ValidationResult result = processApiResponse(response, maskedKey, factionId);
+        // If basic validation failed, return that result
+        if (basicResult.getStatus() != ValidationResult.Status.SUCCESS) {
+            updateApiKeyStatusFromResult(apiKey, factionId, basicResult, connection);
+            return basicResult;
+        }
 
-        // Update database based on result
-        updateApiKeyStatusFromResult(apiKey, factionId, result, connection);
+        // Step 2: Verify the key owner belongs to the expected faction
+        logger.debug("Verifying faction membership for key {}", maskedKey);
+        String keyInfoUrl = "https://api.torn.com/v2/key/info";
+        ApiResponse keyInfoResponse = TornApiHandler.executeRequest(keyInfoUrl, apiKey);
 
-        return result;
+        if (!keyInfoResponse.isSuccess()) {
+            logger.warn("Could not fetch key info for {}: {}", maskedKey, keyInfoResponse.getErrorMessage());
+            // Don't fail validation if we can't check - might be temporary API issue
+            // But log it so we know there might be an issue
+            logger.warn("Unable to verify faction membership - proceeding with caution");
+            updateApiKeyStatusFromResult(apiKey, factionId, basicResult, connection);
+            return basicResult;
+        }
+
+        // Parse key info response
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode keyInfoRoot = objectMapper.readTree(keyInfoResponse.getBody());
+
+            // Extract owner's faction ID from: info.user.faction_id
+            JsonNode infoNode = keyInfoRoot.path("info");
+            JsonNode userNode = infoNode.path("user");
+            JsonNode factionIdNode = userNode.path("faction_id");
+
+            if (factionIdNode.isMissingNode() || factionIdNode.isNull()) {
+                logger.warn("Could not find faction_id in key info for {} - user may not be in a faction", maskedKey);
+                logger.warn("Key owner ({}) may have left their faction", apiKeyInfo.getOwnerName());
+
+                ValidationResult noFactionResult = ValidationResult.permanentFailure(
+                        "Key owner is not in any faction");
+                updateApiKeyStatusFromResult(apiKey, factionId, noFactionResult, connection);
+                return noFactionResult;
+            }
+
+            String actualFactionId = String.valueOf(factionIdNode.asLong());
+
+            // Compare faction IDs
+            if (!factionId.equals(actualFactionId)) {
+                logger.error("API key {} belongs to faction {} but is registered for faction {} - FACTION MISMATCH!",
+                        maskedKey, actualFactionId, factionId);
+                logger.error("Key owner ({}) has moved to a different faction", apiKeyInfo.getOwnerName());
+                logger.error("This key will be marked as inactive for faction {}", factionId);
+
+                ValidationResult mismatchResult = ValidationResult.permanentFailure(
+                        String.format("Faction mismatch: key owner is in faction %s, expected %s",
+                                actualFactionId, factionId));
+                updateApiKeyStatusFromResult(apiKey, factionId, mismatchResult, connection);
+                return mismatchResult;
+            }
+
+            logger.info("✓ API key {} verified: belongs to correct faction {} (owner: {})",
+                    maskedKey, factionId, apiKeyInfo.getOwnerName());
+            updateApiKeyStatusFromResult(apiKey, factionId, basicResult, connection);
+            return basicResult;
+
+        } catch (Exception e) {
+            logger.error("Error parsing key info for {}: {}", maskedKey, e.getMessage(), e);
+            // Don't fail validation if parsing fails - log and continue
+            logger.warn("Could not verify faction membership due to parsing error - proceeding with caution");
+            updateApiKeyStatusFromResult(apiKey, factionId, basicResult, connection);
+            return basicResult;
+        }
     }
 
-     /**
-      * Process the API response and categorize the result
+
+    /**
+     * Process the API response and categorize the result
      */
     private static ValidationResult processApiResponse(ApiResponse response, String maskedKey, String factionId) {
         switch (response.getType()) {
@@ -198,6 +267,7 @@ public class ValidateApiKeys {
 
     /**
      * Process Torn API response body to check for Torn-specific errors
+     * Simplified version - faction verification happens separately in validateApiKeyRobust
      */
     private static ValidationResult processTornApiResponse(String responseBody, String maskedKey, String factionId) {
         if (responseBody == null || responseBody.trim().isEmpty()) {
@@ -217,7 +287,8 @@ public class ValidateApiKeys {
             }
 
             // If no error node, consider it a successful validation
-            logger.info("API key validation successful for key: {} and faction: {}", maskedKey, factionId);
+            // (faction verification happens separately now)
+            logger.debug("API key basic validation successful for key: {} and faction: {}", maskedKey, factionId);
             return ValidationResult.success();
 
         } catch (Exception e) {
