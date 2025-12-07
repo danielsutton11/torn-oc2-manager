@@ -544,20 +544,30 @@ public class UpdateOverviewData {
 
                 String newsText = newsItem.get("text").asText();
 
-                // Check if this news item mentions the item and the user
-                // Patterns to match:
-                // - "loaned 1x [ItemName] to <a href...XID=[userId]>[Username]</a>"
-                // - "loaned 1x [ItemName] to themselves"
-                // - "gave 1x [ItemName] to <a href...XID=[userId]>[Username]</a>"
-                // - "gave 1x [ItemName] to themselves"
-                if (newsText.contains(itemName) &&
-                        (newsText.contains("loaned") || newsText.contains("gave")) &&
-                        (newsText.contains("XID=" + userId) ||
-                                (newsText.contains("to themselves") && newsText.contains("XID=" + userId)))) {
+                // Debug log the news text to see what we're matching against
+                logger.debug("Checking news text: {}", newsText);
 
+                // Check if this news item mentions the item (case-insensitive for safety)
+                if (!newsText.toLowerCase().contains(itemName.toLowerCase())) {
+                    continue; // Item name doesn't match, skip
+                }
+
+                // Check if it's a loan or gave action
+                if (!newsText.contains("loaned") && !newsText.contains("gave")) {
+                    continue; // Not a loan/gave action, skip
+                }
+
+                // Pattern 1: "loaned/gave Xx [ItemName] to <a href...XID=[userId]>[Username]</a>"
+                // Pattern 2: "loaned/gave Xx [ItemName] to themselves" (where the donor's XID appears earlier)
+
+                boolean matchesDirectGift = newsText.contains("to <a href") && newsText.contains("XID=" + userId);
+                boolean matchesToThemselves = newsText.contains("to themselves") && newsText.contains("XID=" + userId);
+
+                if (matchesDirectGift || matchesToThemselves) {
                     String action = newsText.contains("loaned") ? "loaned" : "gave";
                     logger.info("Found armory transaction: user {} was {} {} from armory at timestamp {} - skipping payment request",
                             userId, action, itemName, timestamp);
+                    logger.info("Matching news text: {}", newsText);
                     return true;
                 }
             }
