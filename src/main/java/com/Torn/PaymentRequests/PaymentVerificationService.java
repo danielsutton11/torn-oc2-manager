@@ -204,6 +204,45 @@ public class PaymentVerificationService {
     }
 
     /**
+     * Get current time from Torn API instead of system clock
+     * This is a workaround for system clock issues where the container time is incorrect
+     */
+    private static long getCurrentTimeFromTornAPI(String apiKey) {
+        try {
+            // Use a simple API call to get Torn's current server time
+            String apiUrl = "https://api.torn.com/v2/user";
+            ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
+
+            if (response.isSuccess()) {
+                JsonNode rootNode = objectMapper.readTree(response.getBody());
+                JsonNode timestampNode = rootNode.get("timestamp");
+                if (timestampNode != null) {
+                    long tornTime = timestampNode.asLong();
+                    long systemTime = Instant.now().getEpochSecond();
+                    long timeDiff = Math.abs(tornTime - systemTime);
+
+                    if (timeDiff > 60) { // More than 1 minute difference
+                        logger.warn("System clock discrepancy detected! Torn API time: {}, System time: {}, Difference: {} seconds (~{} hours)",
+                                tornTime, systemTime, timeDiff, timeDiff / 3600);
+                    } else {
+                        logger.debug("Got current time from Torn API: {} (system time: {}, difference: {} seconds)",
+                                tornTime, systemTime, timeDiff);
+                    }
+                    return tornTime;
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not get time from Torn API, falling back to system time + 1 year: {}", e.getMessage());
+        }
+
+        // Fallback to system time + 1 year (365 days) since we know the system clock is behind
+        long systemTime = Instant.now().getEpochSecond();
+        long adjustedTime = systemTime + (365L * 24 * 60 * 60); // Add 365 days in seconds
+        logger.info("Using adjusted system time as fallback: {} (original system time: {})", adjustedTime, systemTime);
+        return adjustedTime;
+    }
+
+    /**
      * Get active factions with API keys for payment verification
      */
     private static List<FactionInfo> getActiveFactions(Connection connection) throws SQLException {
@@ -351,15 +390,18 @@ public class PaymentVerificationService {
         List<JsonNode> allNewsItems = new ArrayList<>();
         Set<String> seenNewsIds = new HashSet<>();
 
-        // Look back 6 minutes (360 seconds) to be safe for a 5-minute job cycle
-        long currentTime = Instant.now().getEpochSecond();
-        long lookbackWindow = currentTime - 360;
+        // Use Torn API time instead of system time to avoid clock issues
+        long currentTime = getCurrentTimeFromTornAPI(faction.getApiKey());
+        long lookbackWindow = currentTime - 360; // Look back 6 minutes (360 seconds) for 5-minute job cycle
 
         String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
         Long fromTimestamp = lookbackWindow;
         Long toTimestamp = currentTime;
         int pagesFetched = 0;
         int maxPages = 20; // Safety limit for high-volume factions
+
+        logger.debug("Starting faction news fetch for faction {} - lookback window: {} seconds (from={}, to={})",
+                faction.getFactionId(), 360, fromTimestamp, toTimestamp);
 
         try {
             boolean keepPaginating = true;

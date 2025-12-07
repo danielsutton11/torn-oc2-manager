@@ -510,6 +510,45 @@ public class UpdateOverviewData {
     }
 
     /**
+     * Get current time from Torn API instead of system clock
+     * This is a workaround for system clock issues where the container time is incorrect
+     */
+    private static long getCurrentTimeFromTornAPI(String apiKey) {
+        try {
+            // Use a simple API call to get Torn's current server time
+            String apiUrl = "https://api.torn.com/v2/user";
+            ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
+
+            if (response.isSuccess()) {
+                com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response.getBody());
+                com.fasterxml.jackson.databind.JsonNode timestampNode = rootNode.get("timestamp");
+                if (timestampNode != null) {
+                    long tornTime = timestampNode.asLong();
+                    long systemTime = Instant.now().getEpochSecond();
+                    long timeDiff = Math.abs(tornTime - systemTime);
+
+                    if (timeDiff > 60) { // More than 1 minute difference
+                        logger.warn("System clock discrepancy detected! Torn API time: {}, System time: {}, Difference: {} seconds (~{} hours)",
+                                tornTime, systemTime, timeDiff, timeDiff / 3600);
+                    } else {
+                        logger.debug("Got current time from Torn API: {} (system time: {}, difference: {} seconds)",
+                                tornTime, systemTime, timeDiff);
+                    }
+                    return tornTime;
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not get time from Torn API, falling back to system time + 1 year: {}", e.getMessage());
+        }
+
+        // Fallback to system time + 1 year (365 days) since we know the system clock is behind
+        long systemTime = Instant.now().getEpochSecond();
+        long adjustedTime = systemTime + (365L * 24 * 60 * 60); // Add 365 days in seconds
+        logger.info("Using adjusted system time as fallback: {} (original system time: {})", adjustedTime, systemTime);
+        return adjustedTime;
+    }
+
+    /**
      * Check if a user was recently given an item from the armory - DIAGNOSTIC VERSION
      * Looks back over the last hour to see if the item was loaned or given to the user
      */
@@ -540,8 +579,8 @@ public class UpdateOverviewData {
 
             logger.info("Processing {} armory news items...", allNewsItems.size());
 
-            // Look back one hour (plus a small buffer for timing variations)
-            long oneHourAgo = Instant.now().getEpochSecond() - 3900; // 65 minutes to be safe
+            // Use Torn API time instead of system time to avoid clock issues
+            long oneHourAgo = getCurrentTimeFromTornAPI(apiKey) - 3900; // 65 minutes to be safe
 
             int itemsChecked = 0;
             int itemsInTimeWindow = 0;
@@ -634,8 +673,8 @@ public class UpdateOverviewData {
         List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = new ArrayList<>();
         Set<String> seenNewsIds = new HashSet<>();
 
-        // Look back 65 minutes to be safe for hourly job cycle
-        long currentTime = Instant.now().getEpochSecond();
+        // Use Torn API time instead of system time to avoid clock issues
+        long currentTime = getCurrentTimeFromTornAPI(apiKey);
         long lookbackWindow = currentTime - 3900; // 65 minutes
 
         String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=armoryAction";
@@ -644,7 +683,7 @@ public class UpdateOverviewData {
         int pagesFetched = 0;
         int maxPages = 50; // Safety limit
 
-        logger.debug("Starting armory news fetch - lookback window: {} seconds ({})", 3900, lookbackWindow);
+        logger.debug("Starting armory news fetch - lookback window: {} seconds (from={}, to={})", 3900, fromTimestamp, toTimestamp);
 
         try {
             boolean keepPaginating = true;
