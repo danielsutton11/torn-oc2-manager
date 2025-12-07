@@ -210,7 +210,7 @@ public class PaymentVerificationService {
     private static long getCurrentTimeFromTornAPI(String apiKey) {
         try {
             // Use a simple API call to get Torn's current server time
-            String apiUrl = "https://api.torn.com/v2/user";
+            String apiUrl = "https://api.torn.com/v2/torn/timestamp";
             ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
 
             if (response.isSuccess()) {
@@ -235,11 +235,8 @@ public class PaymentVerificationService {
             logger.warn("Could not get time from Torn API, falling back to system time + 1 year: {}", e.getMessage());
         }
 
-        // Fallback to system time + 1 year (365 days) since we know the system clock is behind
-        long systemTime = Instant.now().getEpochSecond();
-        long adjustedTime = systemTime + (365L * 24 * 60 * 60); // Add 365 days in seconds
-        logger.info("Using adjusted system time as fallback: {} (original system time: {})", adjustedTime, systemTime);
-        return adjustedTime;
+        // Fallback to system time
+        return Instant.now().getEpochSecond();
     }
 
     /**
