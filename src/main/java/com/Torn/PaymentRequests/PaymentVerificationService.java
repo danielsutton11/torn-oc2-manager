@@ -337,37 +337,38 @@ public class PaymentVerificationService {
     }
 
     /**
-     * Fetch recent faction news with pagination to ensure we don't miss any transactions
-     * Continues fetching until we reach news older than our lookback window (6 minutes for 5-minute job cycle)
+     * Fetch recent faction news with adaptive pagination
+     * Looks back 6 minutes (for 5-minute job cycle) and adapts based on whether we hit the API limit
+     *
+     * Strategy:
+     * - First call: Try to get everything with a single request
+     * - If we get 100 items (API limit), continue paginating
+     * - If we get <100 items, we're done
+     *
+     * This minimizes API calls for low-activity periods while still handling high-activity periods.
      */
     private static List<JsonNode> fetchRecentFactionNews(FactionInfo faction) {
         List<JsonNode> allNewsItems = new ArrayList<>();
-        Set<String> seenNewsIds = new HashSet<>(); // Track IDs to avoid duplicates
+        Set<String> seenNewsIds = new HashSet<>();
 
         // Look back 6 minutes (360 seconds) to be safe for a 5-minute job cycle
         long currentTime = Instant.now().getEpochSecond();
         long lookbackWindow = currentTime - 360;
 
-        // Use 60-second chunks to minimize API calls while still handling high-volume scenarios
-        final int PAGINATION_STEP_SECONDS = 60;
-
         String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
         Long fromTimestamp = lookbackWindow;
-        Long toTimestamp = null; // Initially fetch up to current time
+        Long toTimestamp = currentTime;
         int pagesFetched = 0;
-        int maxPages = 10; // Should be plenty (360s / 60s = 6 theoretical max)
+        int maxPages = 20; // Safety limit for high-volume factions
 
         try {
-            while (pagesFetched < maxPages) {
-                // Build URL with pagination using 'from' and 'to' parameters
-                String apiUrl = baseUrl + "&from=" + fromTimestamp;
-                if (toTimestamp != null) {
-                    apiUrl += "&to=" + toTimestamp;
-                }
+            boolean keepPaginating = true;
+
+            while (keepPaginating && pagesFetched < maxPages) {
+                String apiUrl = baseUrl + "&from=" + fromTimestamp + "&to=" + toTimestamp;
 
                 logger.debug("Fetching faction news page {} for faction {} (from={}, to={})",
-                        pagesFetched + 1, faction.getFactionId(),
-                        fromTimestamp, toTimestamp != null ? toTimestamp : "current");
+                        pagesFetched + 1, faction.getFactionId(), fromTimestamp, toTimestamp);
 
                 ApiResponse response = TornApiHandler.executeRequest(apiUrl, faction.getApiKey());
 
@@ -394,12 +395,12 @@ public class PaymentVerificationService {
                     String newsId = newsItem.get("id").asText();
                     long timestamp = newsItem.get("timestamp").asLong();
 
-                    // Skip if we've already seen this news item (handles duplicates at timestamp boundaries)
+                    // Skip duplicates
                     if (seenNewsIds.contains(newsId)) {
                         continue;
                     }
 
-                    // Track the oldest timestamp we see on this page
+                    // Track the oldest timestamp
                     if (oldestTimestampThisPage == null || timestamp < oldestTimestampThisPage) {
                         oldestTimestampThisPage = timestamp;
                     }
@@ -411,53 +412,56 @@ public class PaymentVerificationService {
 
                 pagesFetched++;
 
-                logger.debug("Added {} unique items from page {} (total: {}), oldest timestamp on page: {}",
-                        itemsAddedFromPage, pagesFetched, allNewsItems.size(), oldestTimestampThisPage);
+                logger.debug("Page {}: fetched {} items, added {} unique items (total: {})",
+                        pagesFetched, newsArray.size(), itemsAddedFromPage, allNewsItems.size());
 
-                // If we got less than 100 items, we've reached the end
+                // Decide if we need to continue paginating
                 if (newsArray.size() < 100) {
-                    logger.debug("Received {} items (less than 100), no more pages available", newsArray.size());
-                    break;
-                }
-
-                // If we added no new items this page, we're stuck (all were duplicates)
-                if (itemsAddedFromPage == 0) {
-                    logger.warn("No new items added from page {} - all duplicates, stopping pagination", pagesFetched);
-                    break;
-                }
-
-                // Move the 'to' timestamp back by PAGINATION_STEP_SECONDS to fetch the next chunk
-                // Use the oldest timestamp we saw, or step back from current toTimestamp
-                if (oldestTimestampThisPage != null) {
-                    toTimestamp = oldestTimestampThisPage - PAGINATION_STEP_SECONDS;
-                } else if (toTimestamp != null) {
-                    toTimestamp = toTimestamp - PAGINATION_STEP_SECONDS;
+                    // Got less than 100 items, so we've reached the end
+                    logger.debug("Received {} items (less than 100), pagination complete", newsArray.size());
+                    keepPaginating = false;
+                } else if (itemsAddedFromPage == 0) {
+                    // All items were duplicates
+                    logger.debug("All items on page {} were duplicates, stopping", pagesFetched);
+                    keepPaginating = false;
+                } else if (oldestTimestampThisPage == null) {
+                    logger.warn("No valid timestamps found on page {}, stopping", pagesFetched);
+                    keepPaginating = false;
+                } else if (oldestTimestampThisPage <= lookbackWindow) {
+                    // Reached the lookback window
+                    logger.debug("Reached lookback window, pagination complete");
+                    keepPaginating = false;
                 } else {
-                    toTimestamp = currentTime - PAGINATION_STEP_SECONDS;
-                }
+                    // Continue paginating - move 'to' backwards
+                    toTimestamp = oldestTimestampThisPage - 1;
 
-                // Safety check: if toTimestamp is now before our lookback window, stop
-                if (toTimestamp < lookbackWindow) {
-                    logger.debug("Next page would be before lookback window (to={}, lookback={}), stopping pagination",
-                            toTimestamp, lookbackWindow);
-                    break;
-                }
-
-                // Rate limiting between pages
-                if (pagesFetched < maxPages) {
+                    // Rate limiting between pages
                     Thread.sleep(TORN_API_RATE_LIMIT_MS);
                 }
             }
 
-            logger.info("Fetched {} unique news items across {} pages for faction {} (lookback: {}s, step: {}s)",
-                    allNewsItems.size(), pagesFetched, faction.getFactionId(), 360, PAGINATION_STEP_SECONDS);
+            // Summary logging with performance metrics
+            if (pagesFetched == 1 && allNewsItems.size() < 100) {
+                logger.info("Fetched {} faction news items in 1 API call for faction {} (low activity period)",
+                        allNewsItems.size(), faction.getFactionId());
+            } else {
+                logger.info("Fetched {} unique faction news items across {} API calls (~{}s elapsed) for faction {}",
+                        allNewsItems.size(), pagesFetched, pagesFetched * 2, faction.getFactionId());
+            }
+
+            if (pagesFetched >= maxPages) {
+                logger.error("Hit maximum page limit ({}) for faction {} - there may be more deposits not captured. " +
+                                "Consider increasing maxPages or running job more frequently.",
+                        maxPages, faction.getFactionId());
+            }
 
         } catch (InterruptedException e) {
-            logger.warn("News fetching interrupted for faction {}", faction.getFactionId());
+            logger.warn("News fetching interrupted for faction {} after {} pages",
+                    faction.getFactionId(), pagesFetched);
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            logger.error("Error fetching paginated faction news for faction {} ({}): {}",
-                    faction.getFactionId(), faction.getOwnerName(), e.getMessage(), e);
+            logger.error("Error fetching faction news for faction {} ({}) after {} pages: {}",
+                    faction.getFactionId(), faction.getOwnerName(), pagesFetched, e.getMessage(), e);
         }
 
         return allNewsItems;

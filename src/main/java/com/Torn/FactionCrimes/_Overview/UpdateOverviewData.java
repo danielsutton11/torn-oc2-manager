@@ -583,41 +583,43 @@ public class UpdateOverviewData {
     }
 
     /**
-     * Fetch recent armory news with pagination to ensure we don't miss any transactions
-     * Looks back 65 minutes to cover the hourly job cycle with buffer
+     * Fetch recent armory news with adaptive pagination
+     * Looks back 65 minutes and adapts based on whether we hit the API limit
+     *
+     * Strategy:
+     * - First call: Try to get everything with a single request
+     * - If we get 100 items (API limit), continue paginating
+     * - If we get <100 items, we're done
+     *
+     * This minimizes API calls for low-activity periods while still handling high-activity periods.
      */
     private static List<com.fasterxml.jackson.databind.JsonNode> fetchRecentArmoryNews(String apiKey) {
         List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = new ArrayList<>();
-        Set<String> seenNewsIds = new HashSet<>(); // Track IDs to avoid duplicates
+        Set<String> seenNewsIds = new HashSet<>();
 
         // Look back 65 minutes to be safe for hourly job cycle
         long currentTime = Instant.now().getEpochSecond();
         long lookbackWindow = currentTime - 3900; // 65 minutes
 
-        // Use 5-minute (300 second) chunks to minimize API calls for hourly job
-        final int PAGINATION_STEP_SECONDS = 300;
-
         String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=armoryAction";
         Long fromTimestamp = lookbackWindow;
-        Long toTimestamp = null; // Initially fetch up to current time
+        Long toTimestamp = currentTime;
         int pagesFetched = 0;
-        int maxPages = 15; // Theoretical max is ~13 (3900s / 300s), set to 15 for safety
+        int maxPages = 50; // Safety limit
 
         try {
-            while (pagesFetched < maxPages) {
-                // Build URL with pagination using 'from' and 'to' parameters
-                String apiUrl = baseUrl + "&from=" + fromTimestamp;
-                if (toTimestamp != null) {
-                    apiUrl += "&to=" + toTimestamp;
-                }
+            boolean keepPaginating = true;
+
+            while (keepPaginating && pagesFetched < maxPages) {
+                String apiUrl = baseUrl + "&from=" + fromTimestamp + "&to=" + toTimestamp;
 
                 logger.debug("Fetching armory news page {} (from={}, to={})",
-                        pagesFetched + 1, fromTimestamp, toTimestamp != null ? toTimestamp : "current");
+                        pagesFetched + 1, fromTimestamp, toTimestamp);
 
                 ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
 
                 if (!response.isSuccess()) {
-                    logger.warn("Failed to fetch armory news for pagination: {}", response.getErrorMessage());
+                    logger.warn("Failed to fetch armory news: {}", response.getErrorMessage());
                     break;
                 }
 
@@ -637,12 +639,12 @@ public class UpdateOverviewData {
                     String newsId = newsItem.get("id").asText();
                     long timestamp = newsItem.get("timestamp").asLong();
 
-                    // Skip if we've already seen this news item
+                    // Skip duplicates
                     if (seenNewsIds.contains(newsId)) {
                         continue;
                     }
 
-                    // Track the oldest timestamp we see on this page
+                    // Track the oldest timestamp
                     if (oldestTimestampThisPage == null || timestamp < oldestTimestampThisPage) {
                         oldestTimestampThisPage = timestamp;
                     }
@@ -654,50 +656,52 @@ public class UpdateOverviewData {
 
                 pagesFetched++;
 
-                logger.debug("Added {} unique armory items from page {} (total: {})",
-                        itemsAddedFromPage, pagesFetched, allNewsItems.size());
+                logger.debug("Page {}: fetched {} items, added {} unique items (total: {})",
+                        pagesFetched, newsArray.size(), itemsAddedFromPage, allNewsItems.size());
 
-                // If we got less than 100 items, we've reached the end
+                // Decide if we need to continue paginating
                 if (newsArray.size() < 100) {
-                    logger.debug("Received {} armory items (less than 100), no more pages available", newsArray.size());
-                    break;
-                }
-
-                // If we added no new items this page, we're stuck (all were duplicates)
-                if (itemsAddedFromPage == 0) {
-                    logger.debug("No new armory items added from page {} - all duplicates, stopping pagination", pagesFetched);
-                    break;
-                }
-
-                // Move the 'to' timestamp back by PAGINATION_STEP_SECONDS (5 minutes) to fetch the next chunk
-                if (oldestTimestampThisPage != null) {
-                    toTimestamp = oldestTimestampThisPage - PAGINATION_STEP_SECONDS;
-                } else if (toTimestamp != null) {
-                    toTimestamp = toTimestamp - PAGINATION_STEP_SECONDS;
+                    // Got less than 100 items, so we've reached the end
+                    logger.debug("Received {} items (less than 100), pagination complete", newsArray.size());
+                    keepPaginating = false;
+                } else if (itemsAddedFromPage == 0) {
+                    // All items were duplicates
+                    logger.debug("All items on page {} were duplicates, stopping", pagesFetched);
+                    keepPaginating = false;
+                } else if (oldestTimestampThisPage == null) {
+                    logger.warn("No valid timestamps found on page {}, stopping", pagesFetched);
+                    keepPaginating = false;
+                } else if (oldestTimestampThisPage <= lookbackWindow) {
+                    // Reached the lookback window
+                    logger.debug("Reached lookback window, pagination complete");
+                    keepPaginating = false;
                 } else {
-                    toTimestamp = currentTime - PAGINATION_STEP_SECONDS;
-                }
+                    // Continue paginating - move 'to' backwards
+                    toTimestamp = oldestTimestampThisPage - 1;
 
-                // Safety check: if toTimestamp is now before our lookback window, stop
-                if (toTimestamp < lookbackWindow) {
-                    logger.debug("Next armory page would be before lookback window, stopping pagination");
-                    break;
-                }
-
-                // Rate limiting between pages
-                if (pagesFetched < maxPages) {
+                    // Rate limiting between pages
                     Thread.sleep(TORN_API_RATE_LIMIT_MS);
                 }
             }
 
-            logger.debug("Fetched {} unique armory news items across {} pages (lookback: 65 min, step: 5 min)",
-                    allNewsItems.size(), pagesFetched);
+            // Summary logging with performance metrics
+            if (pagesFetched == 1 && allNewsItems.size() < 100) {
+                logger.info("Fetched {} armory news items in 1 API call (low activity period)", allNewsItems.size());
+            } else {
+                logger.info("Fetched {} unique armory news items across {} API calls (~{}s elapsed)",
+                        allNewsItems.size(), pagesFetched, pagesFetched * 2);
+            }
+
+            if (pagesFetched >= maxPages) {
+                logger.error("Hit maximum page limit ({}) - there may be more armory transactions not captured. " +
+                        "Consider increasing maxPages or running job more frequently.", maxPages);
+            }
 
         } catch (InterruptedException e) {
-            logger.warn("Armory news fetching interrupted");
+            logger.warn("Armory news fetching interrupted after {} pages", pagesFetched);
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            logger.warn("Error fetching paginated armory news: {}", e.getMessage());
+            logger.error("Error fetching armory news after {} pages: {}", pagesFetched, e.getMessage(), e);
         }
 
         return allNewsItems;
