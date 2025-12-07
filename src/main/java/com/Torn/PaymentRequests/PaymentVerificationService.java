@@ -14,8 +14,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -261,29 +264,22 @@ public class PaymentVerificationService {
                     allRequests.size(), claimedRequests.size(), pendingRequests.size(),
                     faction.getFactionId(), faction.getOwnerName());
 
-            // Fetch faction news for depositFunds category
-            String apiUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
-            ApiResponse response = TornApiHandler.executeRequest(apiUrl, faction.getApiKey());
+            // Fetch all recent faction news entries (paginated)
+            List<JsonNode> allNewsItems = fetchRecentFactionNews(faction);
 
-            if (!response.isSuccess()) {
-                logger.warn("Failed to fetch faction news for faction {} ({}): {}",
-                        faction.getFactionId(), faction.getOwnerName(), response.getErrorMessage());
-                return 0;
-            }
-
-            JsonNode newsData = objectMapper.readTree(response.getBody());
-            JsonNode newsArray = newsData.get("news");
-
-            if (newsArray == null || !newsArray.isArray()) {
+            if (allNewsItems.isEmpty()) {
                 logger.debug("No news data found for faction {} ({})",
                         faction.getFactionId(), faction.getOwnerName());
                 return 0;
             }
 
+            logger.debug("Retrieved {} total news items for faction {} ({})",
+                    allNewsItems.size(), faction.getFactionId(), faction.getOwnerName());
+
             int paymentsVerified = 0;
 
             // Check each news item against claimed requests
-            for (JsonNode newsItem : newsArray) {
+            for (JsonNode newsItem : allNewsItems) {
                 String newsId = newsItem.get("id").asText();
                 String newsText = newsItem.get("text").asText();
                 long timestamp = newsItem.get("timestamp").asLong();
@@ -338,6 +334,133 @@ public class PaymentVerificationService {
                     faction.getFactionId(), faction.getOwnerName(), e.getMessage(), e);
             return 0;
         }
+    }
+
+    /**
+     * Fetch recent faction news with pagination to ensure we don't miss any transactions
+     * Continues fetching until we reach news older than our lookback window (6 minutes for 5-minute job cycle)
+     */
+    private static List<JsonNode> fetchRecentFactionNews(FactionInfo faction) {
+        List<JsonNode> allNewsItems = new ArrayList<>();
+        Set<String> seenNewsIds = new HashSet<>(); // Track IDs to avoid duplicates
+
+        // Look back 6 minutes (360 seconds) to be safe for a 5-minute job cycle
+        long currentTime = Instant.now().getEpochSecond();
+        long lookbackWindow = currentTime - 360;
+
+        // Use 60-second chunks to minimize API calls while still handling high-volume scenarios
+        final int PAGINATION_STEP_SECONDS = 60;
+
+        String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=depositFunds";
+        Long fromTimestamp = lookbackWindow;
+        Long toTimestamp = null; // Initially fetch up to current time
+        int pagesFetched = 0;
+        int maxPages = 10; // Should be plenty (360s / 60s = 6 theoretical max)
+
+        try {
+            while (pagesFetched < maxPages) {
+                // Build URL with pagination using 'from' and 'to' parameters
+                String apiUrl = baseUrl + "&from=" + fromTimestamp;
+                if (toTimestamp != null) {
+                    apiUrl += "&to=" + toTimestamp;
+                }
+
+                logger.debug("Fetching faction news page {} for faction {} (from={}, to={})",
+                        pagesFetched + 1, faction.getFactionId(),
+                        fromTimestamp, toTimestamp != null ? toTimestamp : "current");
+
+                ApiResponse response = TornApiHandler.executeRequest(apiUrl, faction.getApiKey());
+
+                if (!response.isSuccess()) {
+                    logger.warn("Failed to fetch faction news for faction {} ({}): {}",
+                            faction.getFactionId(), faction.getOwnerName(), response.getErrorMessage());
+                    break;
+                }
+
+                JsonNode newsData = objectMapper.readTree(response.getBody());
+                JsonNode newsArray = newsData.get("news");
+
+                if (newsArray == null || !newsArray.isArray() || newsArray.size() == 0) {
+                    logger.debug("No more news data found for faction {} on page {}",
+                            faction.getFactionId(), pagesFetched + 1);
+                    break;
+                }
+
+                int itemsAddedFromPage = 0;
+                Long oldestTimestampThisPage = null;
+
+                // Process news items from this page
+                for (JsonNode newsItem : newsArray) {
+                    String newsId = newsItem.get("id").asText();
+                    long timestamp = newsItem.get("timestamp").asLong();
+
+                    // Skip if we've already seen this news item (handles duplicates at timestamp boundaries)
+                    if (seenNewsIds.contains(newsId)) {
+                        continue;
+                    }
+
+                    // Track the oldest timestamp we see on this page
+                    if (oldestTimestampThisPage == null || timestamp < oldestTimestampThisPage) {
+                        oldestTimestampThisPage = timestamp;
+                    }
+
+                    allNewsItems.add(newsItem);
+                    seenNewsIds.add(newsId);
+                    itemsAddedFromPage++;
+                }
+
+                pagesFetched++;
+
+                logger.debug("Added {} unique items from page {} (total: {}), oldest timestamp on page: {}",
+                        itemsAddedFromPage, pagesFetched, allNewsItems.size(), oldestTimestampThisPage);
+
+                // If we got less than 100 items, we've reached the end
+                if (newsArray.size() < 100) {
+                    logger.debug("Received {} items (less than 100), no more pages available", newsArray.size());
+                    break;
+                }
+
+                // If we added no new items this page, we're stuck (all were duplicates)
+                if (itemsAddedFromPage == 0) {
+                    logger.warn("No new items added from page {} - all duplicates, stopping pagination", pagesFetched);
+                    break;
+                }
+
+                // Move the 'to' timestamp back by PAGINATION_STEP_SECONDS to fetch the next chunk
+                // Use the oldest timestamp we saw, or step back from current toTimestamp
+                if (oldestTimestampThisPage != null) {
+                    toTimestamp = oldestTimestampThisPage - PAGINATION_STEP_SECONDS;
+                } else if (toTimestamp != null) {
+                    toTimestamp = toTimestamp - PAGINATION_STEP_SECONDS;
+                } else {
+                    toTimestamp = currentTime - PAGINATION_STEP_SECONDS;
+                }
+
+                // Safety check: if toTimestamp is now before our lookback window, stop
+                if (toTimestamp < lookbackWindow) {
+                    logger.debug("Next page would be before lookback window (to={}, lookback={}), stopping pagination",
+                            toTimestamp, lookbackWindow);
+                    break;
+                }
+
+                // Rate limiting between pages
+                if (pagesFetched < maxPages) {
+                    Thread.sleep(TORN_API_RATE_LIMIT_MS);
+                }
+            }
+
+            logger.info("Fetched {} unique news items across {} pages for faction {} (lookback: {}s, step: {}s)",
+                    allNewsItems.size(), pagesFetched, faction.getFactionId(), 360, PAGINATION_STEP_SECONDS);
+
+        } catch (InterruptedException e) {
+            logger.warn("News fetching interrupted for faction {}", faction.getFactionId());
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.error("Error fetching paginated faction news for faction {} ({}): {}",
+                    faction.getFactionId(), faction.getOwnerName(), e.getMessage(), e);
+        }
+
+        return allNewsItems;
     }
 
     /**

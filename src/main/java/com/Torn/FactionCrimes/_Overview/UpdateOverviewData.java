@@ -466,6 +466,20 @@ public class UpdateOverviewData {
 
             // Only create payment request if item is NOT reusable
             if (wasNotInCrime && isNowInCrime && userHasItem && newRecord.getItemRequired() != null && itemIsNotReusable) {
+
+                // Check if the item was recently given from the armory
+                boolean wasGivenFromArmory = wasItemGivenFromArmory(
+                        newRecord.getUserId(),
+                        newRecord.getItemRequired(),
+                        factionInfo.getApiKey()
+                );
+
+                if (wasGivenFromArmory) {
+                    logger.info("User {} joined crime {} with item {} that was recently given from armory - skipping payment request",
+                            newRecord.getUsername(), newRecord.getCrimeId(), newRecord.getItemRequired());
+                    continue; // Skip this user - don't create payment request
+                }
+
                 usersJoinedWithItems.add(new DiscordNotificationData.UserJoinedWithItemData(
                         newRecord.getUserId(),
                         newRecord.getUsername(),
@@ -494,6 +508,191 @@ public class UpdateOverviewData {
 
         return null; // No notifications needed
     }
+
+    /**
+     * Check if a user was recently given an item from the armory
+     * Looks back over the last hour to see if the item was loaned or given to the user
+     */
+    private static boolean wasItemGivenFromArmory(String userId, String itemName, String apiKey) {
+        if (userId == null || itemName == null) {
+            return false;
+        }
+
+        try {
+            logger.debug("Checking armory news for user {} and item {}", userId, itemName);
+
+            // Fetch all recent armory news entries (paginated)
+            List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = fetchRecentArmoryNews(apiKey);
+
+            if (allNewsItems.isEmpty()) {
+                logger.debug("No armory news found");
+                return false;
+            }
+
+            logger.debug("Retrieved {} armory news items to check", allNewsItems.size());
+
+            // Look back one hour (plus a small buffer for timing variations)
+            long oneHourAgo = Instant.now().getEpochSecond() - 3900; // 65 minutes to be safe
+
+            for (com.fasterxml.jackson.databind.JsonNode newsItem : allNewsItems) {
+                long timestamp = newsItem.get("timestamp").asLong();
+
+                // Stop checking if we've gone back more than an hour
+                if (timestamp < oneHourAgo) {
+                    break;
+                }
+
+                String newsText = newsItem.get("text").asText();
+
+                // Check if this news item mentions the item and the user
+                // Patterns to match:
+                // - "loaned 1x [ItemName] to <a href...XID=[userId]>[Username]</a>"
+                // - "loaned 1x [ItemName] to themselves"
+                // - "gave 1x [ItemName] to <a href...XID=[userId]>[Username]</a>"
+                // - "gave 1x [ItemName] to themselves"
+                if (newsText.contains(itemName) &&
+                        (newsText.contains("loaned") || newsText.contains("gave")) &&
+                        (newsText.contains("XID=" + userId) ||
+                                (newsText.contains("to themselves") && newsText.contains("XID=" + userId)))) {
+
+                    String action = newsText.contains("loaned") ? "loaned" : "gave";
+                    logger.info("Found armory transaction: user {} was {} {} from armory at timestamp {} - skipping payment request",
+                            userId, action, itemName, timestamp);
+                    return true;
+                }
+            }
+
+            logger.debug("No recent armory transaction found for user {} and item {}", userId, itemName);
+            return false;
+
+        } catch (Exception e) {
+            logger.warn("Error checking armory news for user {} and item {}: {}",
+                    userId, itemName, e.getMessage());
+            return false; // If there's an error, don't block the payment request
+        }
+    }
+
+    /**
+     * Fetch recent armory news with pagination to ensure we don't miss any transactions
+     * Looks back 65 minutes to cover the hourly job cycle with buffer
+     */
+    private static List<com.fasterxml.jackson.databind.JsonNode> fetchRecentArmoryNews(String apiKey) {
+        List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = new ArrayList<>();
+        Set<String> seenNewsIds = new HashSet<>(); // Track IDs to avoid duplicates
+
+        // Look back 65 minutes to be safe for hourly job cycle
+        long currentTime = Instant.now().getEpochSecond();
+        long lookbackWindow = currentTime - 3900; // 65 minutes
+
+        // Use 5-minute (300 second) chunks to minimize API calls for hourly job
+        final int PAGINATION_STEP_SECONDS = 300;
+
+        String baseUrl = "https://api.torn.com/v2/faction/news?striptags=false&limit=100&sort=DESC&cat=armoryAction";
+        Long fromTimestamp = lookbackWindow;
+        Long toTimestamp = null; // Initially fetch up to current time
+        int pagesFetched = 0;
+        int maxPages = 15; // Theoretical max is ~13 (3900s / 300s), set to 15 for safety
+
+        try {
+            while (pagesFetched < maxPages) {
+                // Build URL with pagination using 'from' and 'to' parameters
+                String apiUrl = baseUrl + "&from=" + fromTimestamp;
+                if (toTimestamp != null) {
+                    apiUrl += "&to=" + toTimestamp;
+                }
+
+                logger.debug("Fetching armory news page {} (from={}, to={})",
+                        pagesFetched + 1, fromTimestamp, toTimestamp != null ? toTimestamp : "current");
+
+                ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
+
+                if (!response.isSuccess()) {
+                    logger.warn("Failed to fetch armory news for pagination: {}", response.getErrorMessage());
+                    break;
+                }
+
+                com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response.getBody());
+                com.fasterxml.jackson.databind.JsonNode newsArray = rootNode.get("news");
+
+                if (newsArray == null || !newsArray.isArray() || newsArray.size() == 0) {
+                    logger.debug("No more armory news data found on page {}", pagesFetched + 1);
+                    break;
+                }
+
+                int itemsAddedFromPage = 0;
+                Long oldestTimestampThisPage = null;
+
+                // Process news items from this page
+                for (com.fasterxml.jackson.databind.JsonNode newsItem : newsArray) {
+                    String newsId = newsItem.get("id").asText();
+                    long timestamp = newsItem.get("timestamp").asLong();
+
+                    // Skip if we've already seen this news item
+                    if (seenNewsIds.contains(newsId)) {
+                        continue;
+                    }
+
+                    // Track the oldest timestamp we see on this page
+                    if (oldestTimestampThisPage == null || timestamp < oldestTimestampThisPage) {
+                        oldestTimestampThisPage = timestamp;
+                    }
+
+                    allNewsItems.add(newsItem);
+                    seenNewsIds.add(newsId);
+                    itemsAddedFromPage++;
+                }
+
+                pagesFetched++;
+
+                logger.debug("Added {} unique armory items from page {} (total: {})",
+                        itemsAddedFromPage, pagesFetched, allNewsItems.size());
+
+                // If we got less than 100 items, we've reached the end
+                if (newsArray.size() < 100) {
+                    logger.debug("Received {} armory items (less than 100), no more pages available", newsArray.size());
+                    break;
+                }
+
+                // If we added no new items this page, we're stuck (all were duplicates)
+                if (itemsAddedFromPage == 0) {
+                    logger.debug("No new armory items added from page {} - all duplicates, stopping pagination", pagesFetched);
+                    break;
+                }
+
+                // Move the 'to' timestamp back by PAGINATION_STEP_SECONDS (5 minutes) to fetch the next chunk
+                if (oldestTimestampThisPage != null) {
+                    toTimestamp = oldestTimestampThisPage - PAGINATION_STEP_SECONDS;
+                } else if (toTimestamp != null) {
+                    toTimestamp = toTimestamp - PAGINATION_STEP_SECONDS;
+                } else {
+                    toTimestamp = currentTime - PAGINATION_STEP_SECONDS;
+                }
+
+                // Safety check: if toTimestamp is now before our lookback window, stop
+                if (toTimestamp < lookbackWindow) {
+                    logger.debug("Next armory page would be before lookback window, stopping pagination");
+                    break;
+                }
+
+                // Rate limiting between pages
+                if (pagesFetched < maxPages) {
+                    Thread.sleep(TORN_API_RATE_LIMIT_MS);
+                }
+            }
+
+            logger.debug("Fetched {} unique armory news items across {} pages (lookback: 65 min, step: 5 min)",
+                    allNewsItems.size(), pagesFetched);
+
+        } catch (InterruptedException e) {
+            logger.warn("Armory news fetching interrupted");
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.warn("Error fetching paginated armory news: {}", e.getMessage());
+        }
+
+        return allNewsItems;
+    }
+
     /**
      * Get faction members from the config database
      */
