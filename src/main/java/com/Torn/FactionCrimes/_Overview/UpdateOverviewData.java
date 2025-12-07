@@ -510,50 +510,80 @@ public class UpdateOverviewData {
     }
 
     /**
-     * Check if a user was recently given an item from the armory
+     * Check if a user was recently given an item from the armory - DIAGNOSTIC VERSION
      * Looks back over the last hour to see if the item was loaned or given to the user
      */
     private static boolean wasItemGivenFromArmory(String userId, String itemName, String apiKey) {
         if (userId == null || itemName == null) {
+            logger.warn("wasItemGivenFromArmory called with null userId or itemName");
             return false;
         }
 
-        try {
-            logger.debug("Checking armory news for user {} and item {}", userId, itemName);
+        logger.info("=== ARMORY CHECK START ===");
+        logger.info("Checking armory for userId={}, itemName={}", userId, itemName);
 
+        try {
             // Fetch all recent armory news entries (paginated)
             List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = fetchRecentArmoryNews(apiKey);
 
+            logger.info("Armory news fetch complete: {} items returned", allNewsItems.size());
+
             if (allNewsItems.isEmpty()) {
-                logger.debug("No armory news found");
+                logger.info("No armory news found - cannot verify if item was from armory");
+                logger.info("This could mean:");
+                logger.info("  1. No armory transactions in last 65 minutes");
+                logger.info("  2. API key doesn't have armory news permission");
+                logger.info("  3. API endpoint or parameters incorrect");
+                logger.info("=== ARMORY CHECK END (no data) ===");
                 return false;
             }
 
-            logger.debug("Retrieved {} armory news items to check", allNewsItems.size());
+            logger.info("Processing {} armory news items...", allNewsItems.size());
 
             // Look back one hour (plus a small buffer for timing variations)
             long oneHourAgo = Instant.now().getEpochSecond() - 3900; // 65 minutes to be safe
 
+            int itemsChecked = 0;
+            int itemsInTimeWindow = 0;
+            int itemsMatchingItemName = 0;
+
             for (com.fasterxml.jackson.databind.JsonNode newsItem : allNewsItems) {
+                itemsChecked++;
                 long timestamp = newsItem.get("timestamp").asLong();
 
                 // Stop checking if we've gone back more than an hour
                 if (timestamp < oneHourAgo) {
+                    logger.debug("Item {} is older than time window (timestamp={}), stopping check",
+                            itemsChecked, timestamp);
                     break;
                 }
 
-                String newsText = newsItem.get("text").asText();
+                itemsInTimeWindow++;
 
-                // Debug log the news text to see what we're matching against
-                logger.debug("Checking news text: {}", newsText);
+                String newsText = newsItem.get("text").asText();
+                String newsId = newsItem.get("id").asText();
+
+                // Log every news item for debugging
+                logger.debug("Armory news {}/{}: id={}, timestamp={}, text={}",
+                        itemsChecked, allNewsItems.size(), newsId, timestamp, newsText);
 
                 // Check if this news item mentions the item (case-insensitive for safety)
                 if (!newsText.toLowerCase().contains(itemName.toLowerCase())) {
+                    logger.debug("  -> Item name '{}' not found in news text", itemName);
                     continue; // Item name doesn't match, skip
                 }
 
+                itemsMatchingItemName++;
+                logger.info("Found news item mentioning '{}': {}", itemName, newsText);
+
                 // Check if it's a loan or gave action
-                if (!newsText.contains("loaned") && !newsText.contains("gave")) {
+                boolean isLoan = newsText.contains("loaned");
+                boolean isGave = newsText.contains("gave");
+
+                logger.debug("  -> isLoan={}, isGave={}", isLoan, isGave);
+
+                if (!isLoan && !isGave) {
+                    logger.debug("  -> Not a loan/gave action, skipping");
                     continue; // Not a loan/gave action, skip
                 }
 
@@ -563,21 +593,35 @@ public class UpdateOverviewData {
                 boolean matchesDirectGift = newsText.contains("to <a href") && newsText.contains("XID=" + userId);
                 boolean matchesToThemselves = newsText.contains("to themselves") && newsText.contains("XID=" + userId);
 
+                logger.debug("  -> matchesDirectGift={}, matchesToThemselves={}", matchesDirectGift, matchesToThemselves);
+                logger.debug("  -> Looking for 'XID={}' in text", userId);
+                logger.debug("  -> Looking for 'to <a href' in text: {}", newsText.contains("to <a href"));
+                logger.debug("  -> Looking for 'to themselves' in text: {}", newsText.contains("to themselves"));
+
                 if (matchesDirectGift || matchesToThemselves) {
                     String action = newsText.contains("loaned") ? "loaned" : "gave";
-                    logger.info("Found armory transaction: user {} was {} {} from armory at timestamp {} - skipping payment request",
+                    logger.info("✓ MATCH FOUND! User {} was {} {} from armory at timestamp {}",
                             userId, action, itemName, timestamp);
-                    logger.info("Matching news text: {}", newsText);
+                    logger.info("✓ Matching news text: {}", newsText);
+                    logger.info("=== ARMORY CHECK END (match found) ===");
                     return true;
+                } else {
+                    logger.debug("  -> User ID pattern not found in transaction");
                 }
             }
 
-            logger.debug("No recent armory transaction found for user {} and item {}", userId, itemName);
+            logger.info("Armory check summary:");
+            logger.info("  Total items checked: {}", itemsChecked);
+            logger.info("  Items in time window: {}", itemsInTimeWindow);
+            logger.info("  Items mentioning '{}': {}", itemName, itemsMatchingItemName);
+            logger.info("  No matching transaction found for user {} and item {}", userId, itemName);
+            logger.info("=== ARMORY CHECK END (no match) ===");
             return false;
 
         } catch (Exception e) {
-            logger.warn("Error checking armory news for user {} and item {}: {}",
-                    userId, itemName, e.getMessage());
+            logger.error("Error checking armory news for user {} and item {}: {}",
+                    userId, itemName, e.getMessage(), e);
+            logger.info("=== ARMORY CHECK END (error) ===");
             return false; // If there's an error, don't block the payment request
         }
     }
@@ -585,13 +629,6 @@ public class UpdateOverviewData {
     /**
      * Fetch recent armory news with adaptive pagination
      * Looks back 65 minutes and adapts based on whether we hit the API limit
-     *
-     * Strategy:
-     * - First call: Try to get everything with a single request
-     * - If we get 100 items (API limit), continue paginating
-     * - If we get <100 items, we're done
-     *
-     * This minimizes API calls for low-activity periods while still handling high-activity periods.
      */
     private static List<com.fasterxml.jackson.databind.JsonNode> fetchRecentArmoryNews(String apiKey) {
         List<com.fasterxml.jackson.databind.JsonNode> allNewsItems = new ArrayList<>();
@@ -607,6 +644,8 @@ public class UpdateOverviewData {
         int pagesFetched = 0;
         int maxPages = 50; // Safety limit
 
+        logger.debug("Starting armory news fetch - lookback window: {} seconds ({})", 3900, lookbackWindow);
+
         try {
             boolean keepPaginating = true;
 
@@ -619,15 +658,24 @@ public class UpdateOverviewData {
                 ApiResponse response = TornApiHandler.executeRequest(apiUrl, apiKey);
 
                 if (!response.isSuccess()) {
-                    logger.warn("Failed to fetch armory news: {}", response.getErrorMessage());
+                    logger.warn("Failed to fetch armory news on page {}: {}",
+                            pagesFetched + 1, response.getErrorMessage());
                     break;
                 }
 
                 com.fasterxml.jackson.databind.JsonNode rootNode = objectMapper.readTree(response.getBody());
                 com.fasterxml.jackson.databind.JsonNode newsArray = rootNode.get("news");
 
-                if (newsArray == null || !newsArray.isArray() || newsArray.size() == 0) {
+                // Check if we got any data
+                int itemsInResponse = (newsArray != null && newsArray.isArray()) ? newsArray.size() : 0;
+                logger.debug("API returned {} items on page {}", itemsInResponse, pagesFetched + 1);
+
+                if (newsArray == null || !newsArray.isArray() || itemsInResponse == 0) {
                     logger.debug("No more armory news data found on page {}", pagesFetched + 1);
+                    // Even if first page is empty, log that we tried
+                    if (pagesFetched == 0) {
+                        logger.info("No armory news found in last 65 minutes (first API call returned 0 items)");
+                    }
                     break;
                 }
 
@@ -641,6 +689,7 @@ public class UpdateOverviewData {
 
                     // Skip duplicates
                     if (seenNewsIds.contains(newsId)) {
+                        logger.debug("Skipping duplicate news item: {}", newsId);
                         continue;
                     }
 
@@ -657,12 +706,12 @@ public class UpdateOverviewData {
                 pagesFetched++;
 
                 logger.debug("Page {}: fetched {} items, added {} unique items (total: {})",
-                        pagesFetched, newsArray.size(), itemsAddedFromPage, allNewsItems.size());
+                        pagesFetched, itemsInResponse, itemsAddedFromPage, allNewsItems.size());
 
                 // Decide if we need to continue paginating
-                if (newsArray.size() < 100) {
+                if (itemsInResponse < 100) {
                     // Got less than 100 items, so we've reached the end
-                    logger.debug("Received {} items (less than 100), pagination complete", newsArray.size());
+                    logger.debug("Received {} items (less than 100), pagination complete", itemsInResponse);
                     keepPaginating = false;
                 } else if (itemsAddedFromPage == 0) {
                     // All items were duplicates
@@ -685,7 +734,9 @@ public class UpdateOverviewData {
             }
 
             // Summary logging with performance metrics
-            if (pagesFetched == 1 && allNewsItems.size() < 100) {
+            if (pagesFetched == 0) {
+                logger.info("No armory news API calls made (possible error or no data)");
+            } else if (pagesFetched == 1 && allNewsItems.size() < 100) {
                 logger.info("Fetched {} armory news items in 1 API call (low activity period)", allNewsItems.size());
             } else {
                 logger.info("Fetched {} unique armory news items across {} API calls (~{}s elapsed)",
@@ -704,6 +755,7 @@ public class UpdateOverviewData {
             logger.error("Error fetching armory news after {} pages: {}", pagesFetched, e.getMessage(), e);
         }
 
+        logger.debug("Returning {} total armory news items", allNewsItems.size());
         return allNewsItems;
     }
 
