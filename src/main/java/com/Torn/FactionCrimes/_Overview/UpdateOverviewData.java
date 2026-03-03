@@ -458,8 +458,8 @@ public class UpdateOverviewData {
 
             OverviewRecord existingRecord = existingMap.get(newRecord.getUserId());
 
-            // Check if this user was NOT in a crime previously and is now in a crime with an item they have
-            boolean wasNotInCrime = (existingRecord == null || !existingRecord.isInOrganisedCrime());
+            // Check if this user is in a new or different crime and now has an item they own
+            boolean wasNotInCrime = (existingRecord == null || !existingRecord.isInOrganisedCrime() || !Objects.equals(existingRecord.getCrimeId(), newRecord.getCrimeId()));
             boolean isNowInCrime = newRecord.isInOrganisedCrime();
             boolean userHasItem = Boolean.TRUE.equals(newRecord.getUserHasItem());
             boolean itemIsNotReusable = Boolean.FALSE.equals(newRecord.getItemIsReusable());
