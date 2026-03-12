@@ -255,46 +255,49 @@ public class CheckUsersHaveItems {
             List<ItemTransferRequest> transferRequests = new ArrayList<>();
 
             for (UserItemRequest request : allItemRequests) {
-                if (request.isItemReusable() &&
-                        request.getItemAveragePrice() != null &&
-                        request.getItemAveragePrice() > Constants.ITEM_TRANSFER_THRESHOLD) {
 
-                    // High-value reusable item - check for potential transfer
-                    // Pass the current user's ID to exclude them from the search
-                    LastItemUser lastUser = getLastUserWithItem(ocDataConnection, factionInfo.getDbSuffix(),
-                            request.getItemRequired(), request.getUserId());
+                regularItemRequests.add(request);
 
-                    if (lastUser != null && !isUserCurrentlyUsingItem(ocDataConnection, overviewTableName,
-                            lastUser.getUserId(), request.getItemRequired())) {
-                        // Create transfer request
-                        transferRequests.add(new ItemTransferRequest(
-                                lastUser.getUserId(),
-                                lastUser.getUsername(),
-                                request.getUserId(),
-                                request.getUsername(),
-                                request.getItemRequired(),
-                                request.getCrimeName(),
-                                request.getCrimeId(),
-                                request.getItemAveragePrice().longValue()
-                        ));
-
-                        logger.info("Created transfer request: {} should send {} to {} for crime {}",
-                                lastUser.getUsername(), request.getItemRequired(), request.getUsername(), request.getCrimeName());
-                    } else {
-                        // No available user to transfer from, treat as regular request
-                        regularItemRequests.add(request);
-                        if (lastUser == null) {
-                            logger.info("No previous user found for high-value item {} - adding to regular purchase requests",
-                                    request.getItemRequired());
-                        } else {
-                            logger.info("Previous user {} still using item {} - adding to regular purchase requests",
-                                    lastUser.getUsername(), request.getItemRequired());
-                        }
-                    }
-                } else {
-                    // Regular item request (non-reusable or below threshold)
-                    regularItemRequests.add(request);
-                }
+//                if (request.isItemReusable() &&
+//                        request.getItemAveragePrice() != null &&
+//                        request.getItemAveragePrice() > Constants.ITEM_TRANSFER_THRESHOLD) {
+//
+//                    // High-value reusable item - check for potential transfer
+//                    // Pass the current user's ID to exclude them from the search
+//                    LastItemUser lastUser = getLastUserWithItem(ocDataConnection, factionInfo.getDbSuffix(),
+//                            request.getItemRequired(), request.getUserId());
+//
+//                    if (lastUser != null && !isUserCurrentlyUsingItem(ocDataConnection, overviewTableName,
+//                            lastUser.getUserId(), request.getItemRequired())) {
+//                        // Create transfer request
+//                        transferRequests.add(new ItemTransferRequest(
+//                                lastUser.getUserId(),
+//                                lastUser.getUsername(),
+//                                request.getUserId(),
+//                                request.getUsername(),
+//                                request.getItemRequired(),
+//                                request.getCrimeName(),
+//                                request.getCrimeId(),
+//                                request.getItemAveragePrice().longValue()
+//                        ));
+//
+//                        logger.info("Created transfer request: {} should send {} to {} for crime {}",
+//                                lastUser.getUsername(), request.getItemRequired(), request.getUsername(), request.getCrimeName());
+//                    } else {
+//                        // No available user to transfer from, treat as regular request
+//                        regularItemRequests.add(request);
+//                        if (lastUser == null) {
+//                            logger.info("No previous user found for high-value item {} - adding to regular purchase requests",
+//                                    request.getItemRequired());
+//                        } else {
+//                            logger.info("Previous user {} still using item {} - adding to regular purchase requests",
+//                                    lastUser.getUsername(), request.getItemRequired());
+//                        }
+//                    }
+//                } else {
+//                    // Regular item request (non-reusable or below threshold)
+//                    regularItemRequests.add(request);
+//                }
             }
 
             // Log faction purchase requirements for regular items only
