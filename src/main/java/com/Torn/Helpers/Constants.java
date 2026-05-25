@@ -64,6 +64,7 @@ public class Constants {
     public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
     public static final String TABLE_NAME_CPR = "cpr_";
     public static final String TABLE_NAME_OVERVIEW = "overview_";
+    public static final String TABLE_NAME_PENDING_ITEM_NOTIFICATIONS = "pending_item_notifications";
 
     public static final String COLUMN_NAME_USER_ID = "user_id";
     public static final String COLUMN_NAME_USER_NAME = "username";
