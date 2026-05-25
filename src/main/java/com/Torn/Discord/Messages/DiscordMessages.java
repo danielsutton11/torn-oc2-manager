@@ -34,79 +34,6 @@ public class DiscordMessages {
 
 
     /**
-     * Enhanced sendPayMemberForItem method with better messaging and manual option
-     */
-    public static boolean sendPayMemberForItem(String factionId,
-                                               String playerName,
-                                               String playerId,
-                                               String requestId,
-                                               String itemName,
-                                               long amount) {
-
-        String profileUrl = String.format("https://www.torn.com/profile.php?id=%s", playerId);
-
-        DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("💰 Payment Request #" + requestId)
-                .setDescription(String.format(
-                        "**[%s[%s]](%s)** needs payment for an OC item they already had:\n\n" +
-                                "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n\n",
-                        playerName, playerId, profileUrl, itemName, formatCurrency(amount)
-                ))
-                .setColor(Colors.BLUE)
-                .addField("__Quick Actions__",
-                        "\n\n\n[**Auto Fulfill**](" + createPayUrl(playerId, amount, requestId) + ") - " +
-                                "Open Torn payment page - Prefilled\n" +
-                                "[**Manually Fulfill**](" + createManualPayUrl(requestId) + ") - " +
-                                "Open Torn payment page - Manual Entry\n\n\n",
-                        false)
-                .addField("ℹ️ Important Notes",
-                          "\n\n\n• Links become invalid once claimed by someone\n" +
-                                "• Unclaimed requests reset after 1 hour.",
-                        false)
-                .setFooter("OC2 Payment System • Expires 1 hour after being claimed", null)
-                .setTimestamp(java.time.Instant.now().toString());
-
-        // Send to bankers with custom username
-        return SendDiscordMessage.sendToRole(
-                factionId,
-                RoleType.BANKER,
-                null,
-                embed,
-                "OC2 Manager"
-        );
-    }
-
-    /**
-     * send PaymentFulfilled Message
-     */
-    public static boolean paymentFulfilled(String factionId, String username, String userId,
-                                           String requestId, String itemRequired, long itemValue,
-                                           String fulfilledBy){
-
-        DiscordEmbed embed = new DiscordEmbed()
-                .setTitle("💰 Payment Fulfilled #" + requestId)
-                .setDescription(String.format(
-                        "The payment to **%s [%s]** has been fulfilled by %s\n\n" +
-                                "💎 **Item:** %s\n" +
-                                "💵 **Amount:** %s\n\n\n",
-                        username, userId,fulfilledBy, itemRequired, formatCurrency(itemValue)
-                ))
-                .addField("Status", "✅ **COMPLETED**", true)
-                .setColor(Colors.GREEN)
-                .setFooter("OC2 Payment System", null)
-                .setTimestamp(java.time.Instant.now().toString());
-
-        // Send to bankers with custom username
-        return SendDiscordMessage.sendMessageNoRole(
-                factionId,
-                null,
-                embed,
-                "OC2 Manager"
-        );
-    }
-
-    /**
      * Send withdraw Xanax notification
      */
     public static boolean sendLeaderWithdrawXanax(String factionId, String crimeName, String itemQuantity) {
@@ -643,26 +570,6 @@ public class DiscordMessages {
         quickActions.append("\n\n✅ **Mark as Fulfilled** (React with ✅)");
         return quickActions;
     }
-
-    public static String createPayUrl(String userId, long amount, String requestId){
-        String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
-        if (baseUrl == null) {
-            baseUrl = "https://oc2-payment-service-dev.up.railway.app";
-        }
-        return baseUrl + "/payment/claim/" + requestId + "?userId=" + userId;
-    }
-
-    /**
-     * Create manual payment URL for cases where auto-fulfill doesn't work
-     */
-    public static String createManualPayUrl(String requestId) {
-        String baseUrl = System.getenv(Constants.PAYMENT_SERVICE_BASE_URL);
-        if (baseUrl == null) {
-            baseUrl = "https://oc2-payment-service-dev.up.railway.app";
-        }
-        return baseUrl + "/payment/manual/" + requestId;
-    }
-
 
     public static String formatCurrency(long number) {
         DecimalFormat formatter = new DecimalFormat("$#,###");
