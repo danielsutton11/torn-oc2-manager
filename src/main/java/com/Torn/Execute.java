@@ -37,7 +37,6 @@ import static com.Torn.FactionCrimes.Completed.UpdateMemberCPR.updateAllFactions
 import static com.Torn.Helpers.TableCleanupUtility.deleteAllTables;
 import static com.Torn.Helpers.TableCleanupUtility.getTableCleanupSummary;
 import static com.Torn.ItemManagement.CheckUsersHaveItems.checkUsersHaveItems;
-import static com.Torn.PaymentRequests.PaymentVerificationService.verifyPaymentsAndExpireRequests;
 
 @SpringBootApplication
 @EnableWebMvc
@@ -138,10 +137,6 @@ public class Execute {
                 case Constants.JOB_CHECK_USER_ITEMS:
                     logger.info("Running user items check job");
                     checkUsersHaveItems();
-                    break;
-                case Constants.JOB_VERIFY_PAYMENTS:
-                    logger.info("Running payment verification job");
-                    verifyPaymentsAndExpireRequests();
                     break;
                 case Constants.JOB_CHECK_AVAILABLE_CRIMES_MEMBERS:
                     logger.info("Running available crimes check job");
