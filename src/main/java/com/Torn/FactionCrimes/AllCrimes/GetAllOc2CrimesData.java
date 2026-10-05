@@ -300,6 +300,7 @@ public class GetAllOc2CrimesData {
         }
     }
 
+
     /**
      * Parse slots for a crime
      */
@@ -314,9 +315,7 @@ public class GetAllOc2CrimesData {
         Map<String, List<JsonNode>> groupedSlots = new HashMap<>();
 
         for (JsonNode slotNode : slotsNode) {
-            String slotId = slotNode.get(Constants.NODE_ID).asText();
             String position = slotNode.get(Constants.NODE_NAME).asText();
-
             groupedSlots.computeIfAbsent(position, k -> new ArrayList<>()).add(slotNode);
         }
 
@@ -326,16 +325,16 @@ public class GetAllOc2CrimesData {
             List<JsonNode> group = entry.getValue();
 
             // Sort by slot ID for consistent ordering
-            group.sort((a, b) -> a.get("id").asText().compareTo(b.get("id").asText()));
+            group.sort(Comparator.comparing(GetAllOc2CrimesData::getSlotId,
+                    Comparator.nullsLast(Comparator.naturalOrder())));
 
             for (int i = 0; i < group.size(); i++) {
                 JsonNode slotNode = group.get(i);
-                String slotId = slotNode.get(Constants.NODE_ID).asText();
+                String slotId = getSlotId(slotNode);
 
-                // Apply naming logic: single slot keeps original name, multiple get #1, #2, etc.
+                // Single slot keeps original name, multiple get #1, #2, etc.
                 String roleName = group.size() > 1 ? basePosition + " #" + (i + 1) : basePosition;
 
-                // Parse required item
                 Long requiredItemId = null;
                 String requiredItemName = null;
                 boolean isReusable = true;
@@ -346,10 +345,16 @@ public class GetAllOc2CrimesData {
                     requiredItemId = requiredItemNode.get(Constants.NODE_ID).asLong();
                     isReusable = !requiredItemNode.get(Constants.NODE_IS_USED).asBoolean();
 
-                    // Fetch item details from market
+                    // Name now comes in the payload; market call is only needed for price
+                    if (requiredItemNode.hasNonNull("name")) {
+                        requiredItemName = requiredItemNode.get("name").asText();
+                    }
+
                     Item itemDetails = fetchItemMarketSafe(requiredItemId, apiKey);
                     if (itemDetails != null) {
-                        requiredItemName = itemDetails.getName();
+                        if (requiredItemName == null) {
+                            requiredItemName = itemDetails.getName();
+                        }
                         averagePrice = itemDetails.getAveragePrice();
                     }
                 }
@@ -359,6 +364,18 @@ public class GetAllOc2CrimesData {
         }
 
         return slots;
+    }
+
+    /**
+     * Slot ID moved into position_info in the v2 response; falls back to the old top-level id.
+     */
+    private static String getSlotId(JsonNode slotNode) {
+        JsonNode posInfo = slotNode.get("position_info");
+        if (posInfo != null && posInfo.hasNonNull("id")) {
+            return posInfo.get("id").asText();
+        }
+        JsonNode legacy = slotNode.get(Constants.NODE_ID);
+        return legacy != null ? legacy.asText() : null;
     }
 
     /**
@@ -794,4 +811,5 @@ public class GetAllOc2CrimesData {
                 !dbSuffix.isEmpty() &&
                 dbSuffix.length() <= 50;
     }
+
 }
