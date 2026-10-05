@@ -2,7 +2,6 @@ package com.Torn.FactionCrimes._Overview;
 
 import com.Torn.Api.ApiResponse;
 import com.Torn.Api.TornApiHandler;
-import com.Torn.Discord.Messages.DiscordMessages;
 import com.Torn.Execute;
 import com.Torn.FactionCrimes.Models.CrimesModel.Crime;
 import com.Torn.FactionCrimes.Models.CrimesModel.CrimesResponse;
@@ -10,12 +9,10 @@ import com.Torn.FactionCrimes.Models.CrimesModel.Slot;
 import com.Torn.FactionCrimes.Models.CrimesModel.SlotUser;
 import com.Torn.FactionCrimes.Models.ItemMarketModel.Item;
 import com.Torn.FactionCrimes.Models.ItemMarketModel.ItemMarketResponse;
-import com.Torn.PaymentRequests.PaymentRequest;
-import com.Torn.PaymentRequests.PaymentRequestDAO;
 import com.Torn.Helpers.Constants;
+import com.Torn.ItemManagement.PendingItemNotificationDAO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.Torn.ItemManagement.FactionItemTracking;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -226,10 +223,11 @@ public class UpdateOverviewData {
 
             logger.info("Found {} OC2-enabled factions to process overview data for", factions.size());
 
+            PendingItemNotificationDAO.createTableIfNotExists(configConnection);
+
             int processedCount = 0;
             int successfulCount = 0;
             int failedCount = 0;
-            List<DiscordNotificationData> allNotifications = new ArrayList<>();
 
             for (FactionInfo factionInfo : factions) {
                 try {
@@ -244,9 +242,9 @@ public class UpdateOverviewData {
                                 factionInfo.getFactionId(), factionInfo.getOwnerName(), result.getRecordsProcessed());
                         successfulCount++;
 
-                        // Collect notification data if any
+                        // Store pending notifications for users who newly joined with their own item
                         if (result.getNotificationData() != null && !result.getNotificationData().getUsersJoinedWithItems().isEmpty()) {
-                            allNotifications.add(result.getNotificationData());
+                            storePendingNotifications(configConnection, result.getNotificationData());
                         }
                     } else if (result.isCircuitBreakerOpen()) {
                         logger.error("Circuit breaker opened during processing - stopping remaining factions");
@@ -276,17 +274,11 @@ public class UpdateOverviewData {
                 }
             }
 
-            // Send Discord notifications for all factions that had users join with items
-            if (!allNotifications.isEmpty()) {
-                sendDiscordNotifications(allNotifications);
-            }
-
             // Final summary
             logger.info("Overview data update completed:");
             logger.info("  Total factions processed: {}/{}", processedCount, factions.size());
             logger.info("  Successful: {}", successfulCount);
             logger.info("  Failed: {}", failedCount);
-            logger.info("  Discord notifications sent for: {} factions", allNotifications.size());
 
             // Log final circuit breaker status
             cbStatus = TornApiHandler.getCircuitBreakerStatus();
@@ -1269,139 +1261,37 @@ public class UpdateOverviewData {
     /**
      * Send Discord notifications for users who joined crimes with items they have
      */
-    private static void sendDiscordNotifications(List<DiscordNotificationData> allNotifications) {
-        if (allNotifications.isEmpty()) {
-            logger.info("No Discord notifications to send");
+    private static void storePendingNotifications(Connection configConnection, DiscordNotificationData notification) {
+        String suppressProcessing = System.getenv(Constants.SUPPRESS_PROCESSING);
+        if ("true".equalsIgnoreCase(suppressProcessing)) {
+            logger.debug("Processing suppressed during setup - skipping pending notification storage for faction {}",
+                    notification.getFactionId());
             return;
         }
 
-        logger.info("Processing Discord notifications for {} factions", allNotifications.size());
-
-        String configDatabaseUrl = System.getenv(Constants.DATABASE_URL_CONFIG);
-        if (configDatabaseUrl == null || configDatabaseUrl.isEmpty()) {
-            logger.error("Cannot send Discord notifications - DATABASE_URL_CONFIG not set");
-            return;
+        int stored = 0;
+        for (DiscordNotificationData.UserJoinedWithItemData userData : notification.getUsersJoinedWithItems()) {
+            try {
+                PendingItemNotificationDAO.insertNotification(
+                        configConnection,
+                        notification.getFactionId(),
+                        userData.getUserId(),
+                        userData.getUsername(),
+                        userData.getCrimeId(),
+                        userData.getCrimeName(),
+                        userData.getRole(),
+                        userData.getItemRequired(),
+                        userData.getItemAveragePrice()
+                );
+                stored++;
+            } catch (SQLException e) {
+                logger.error("Failed to store pending item notification for user {} in faction {}: {}",
+                        userData.getUsername(), notification.getFactionId(), e.getMessage());
+            }
         }
 
-        try (Connection configConnection = Execute.postgres.connect(configDatabaseUrl, logger)) {
-            // Create payment requests table if it doesn't exist
-            PaymentRequestDAO.createTableIfNotExists(configConnection);
-
-            int totalNotificationsSent = 0;
-            int totalRequestsCreated = 0;
-            int failedNotifications = 0;
-
-            for (DiscordNotificationData notification : allNotifications) {
-                try {
-
-                    logger.info("Processing notifications for faction {} with {} users",
-                            notification.getFactionId(), notification.getUsersJoinedWithItems().size());
-
-                    for (DiscordNotificationData.UserJoinedWithItemData userData : notification.getUsersJoinedWithItems()) {
-
-                        // Check if payment requests are suppressed (during setup jobs)
-                        String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
-                        if ("true".equalsIgnoreCase(suppressNotifications)) {
-                            logger.debug("Payment requests suppressed during setup - skipping request creation for user {}",
-                                    userData.getUsername());
-                            continue; // Skip to next user
-                        }
-
-                        try {
-                            // Create payment request record in database
-                            PaymentRequest paymentRequest = new PaymentRequest(
-                                    null, // requestId will be generated by DAO
-                                    notification.getFactionId(),
-                                    userData.getUserId(),
-                                    userData.getUsername(),
-                                    userData.getCrimeId(),
-                                    userData.getRole(),
-                                    userData.getItemRequired(),
-                                    userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : 0L
-                            );
-
-                            // Insert into database and get the generated request ID
-                            String requestId = PaymentRequestDAO.insertPaymentRequest(configConnection, paymentRequest);
-
-                            // Log member payment requirement in item tracking
-                            try {
-                                String ocDataDatabaseUrl = System.getenv(Constants.DATABASE_URL_OC_DATA);
-                                if (ocDataDatabaseUrl != null && !ocDataDatabaseUrl.isEmpty()) {
-                                    try (Connection ocDataConnection = Execute.postgres.connect(ocDataDatabaseUrl, logger)) {
-                                        FactionItemTracking.logMemberPaymentRequired(
-                                                ocDataConnection,
-                                                notification.getFactionSuffix(),
-                                                userData.getCrimeName(),
-                                                userData.getUserId(),
-                                                userData.getUsername(),
-                                                userData.getItemRequired(),
-                                                userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : null,
-                                                requestId
-                                        );
-                                    }
-                                }
-                            } catch (SQLException e) {
-                                logger.warn("Failed to log member payment requirement for user {}: {}",
-                                        userData.getUsername(), e.getMessage());
-                            }
-
-                            // Send Discord notification with the unique request ID
-                            boolean success = DiscordMessages.sendPayMemberForItem(
-                                    notification.getFactionId(),
-                                    userData.getUsername(),
-                                    userData.getUserId(),
-                                    requestId, // Use database-generated request ID
-                                    userData.getItemRequired(),
-                                    userData.getItemAveragePrice() != null ? userData.getItemAveragePrice().longValue() : 0L
-                            );
-
-                            if (success) {
-                                totalNotificationsSent++;
-                                totalRequestsCreated++;
-                                logger.info("Sent payment request for user {} (request: {}, value: ${})",
-                                        userData.getUsername(), requestId,
-                                        userData.getItemAveragePrice() != null ? userData.getItemAveragePrice() : 0);
-                            } else {
-                                failedNotifications++;
-                                logger.error("Failed to send Discord notification for user {} (request: {})",
-                                        userData.getUsername(), requestId);
-                            }
-
-                        } catch (Exception e) {
-                            failedNotifications++;
-                            logger.error("Error processing notification for user {} in faction {}: {}",
-                                    userData.getUsername(), notification.getFactionId(), e.getMessage(), e);
-                        }
-                    }
-
-                } catch (Exception e) {
-                    logger.error("Error processing notifications for faction {}: {}",
-                            notification.getFactionId(), e.getMessage(), e);
-                }
-            }
-
-            String suppressNotifications = System.getenv(Constants.SUPPRESS_PROCESSING);
-            if ("true".equalsIgnoreCase(suppressNotifications)) {
-                logger.info("Setup mode: Discord notifications and payment requests suppressed");
-                logger.info("  Users with items detected: {}", allNotifications.stream()
-                        .mapToInt(n -> n.getUsersJoinedWithItems().size()).sum());
-            } else {
-                logger.info("Discord notifications completed:");
-                logger.info("  Payment requests created: {}", totalRequestsCreated);
-                logger.info("  Notifications sent successfully: {}", totalNotificationsSent);
-                logger.info("  Failed notifications: {}", failedNotifications);
-
-                if (totalRequestsCreated > 0) {
-                    logger.info("All payment requests are tracked in the database and will expire if not claimed within 15 minutes");
-                }
-            }
-
-        } catch (SQLException e) {
-            logger.error("Database error during Discord notifications - continuing with overview update", e);
-        } catch (Exception e) {
-            logger.error("Unexpected error during Discord notifications - continuing with overview update: {}",
-                    e.getMessage(), e);
-        }
+        logger.info("Stored {} pending item notifications for faction {} (to be included in 6pm job)",
+                stored, notification.getFactionId());
     }
 
     // Utility methods

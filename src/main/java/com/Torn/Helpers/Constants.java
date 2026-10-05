@@ -19,15 +19,11 @@ public class Constants {
     public static final String JOB_UPDATE_CRIMES_PAID_DATA = "CRIMES_PAID";
     public static final String JOB_UPDATE_UPDATE_CPR_DATA = "UPDATE_MEMBER_CPR";
     public static final String JOB_UPDATE_TORNSTATS_CPR = "UPDATE_TORNSTATS_CPR";
-    public static final String JOB_VERIFY_PAYMENTS = "VERIFY_PAYMENTS";
-
     public static final String OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP = "OVERRIDE_COMPLETED_CRIMES_FROM_TIMESTAMP";
     public static final String OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES = "OVERRIDE_COMPLETED_CRIMES_INCREMENTAL_MINUTES";
     public static final String OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP = "OVERRIDE_PAYOUT_CRIMES_FROM_TIMESTAMP";
     public static final String OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS = "OVERRIDE_PAYOUT_CRIMES_LOOKBACK_HOURS";
 
-    //PAYMENT SERVICE
-    public static final String PAYMENT_SERVICE_BASE_URL = "PAYMENT_SERVICE_BASE_URL";
     public static final String SUPPRESS_PROCESSING = "SUPPRESS_PROCESSING";
 
     //POSTGRES
@@ -64,6 +60,7 @@ public class Constants {
     public static final String TABLE_NAME_REWARDS_CRIMES = "r_crimes_";
     public static final String TABLE_NAME_CPR = "cpr_";
     public static final String TABLE_NAME_OVERVIEW = "overview_";
+    public static final String TABLE_NAME_PENDING_ITEM_NOTIFICATIONS = "pending_item_notifications";
 
     public static final String COLUMN_NAME_USER_ID = "user_id";
     public static final String COLUMN_NAME_USER_NAME = "username";

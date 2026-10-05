@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.*;
-import java.util.List;
 
 /**
  * Utility class for tracking faction item purchases and member payments
@@ -23,16 +22,6 @@ public class FactionItemTracking {
 
     private static final Logger logger = LoggerFactory.getLogger(FactionItemTracking.class);
 
-
-    public enum ItemActionType {
-        FACTION_PURCHASE,    // Faction needs to buy the item
-        MEMBER_PAYMENT       // Faction needs to pay member for item they have
-    }
-
-    public enum PaymentStatus {
-        PENDING,    // Payment request created but not fulfilled
-        FULFILLED   // Payment request has been fulfilled
-    }
 
     /**
      * Create faction item tracking table for a specific faction
@@ -51,7 +40,6 @@ public class FactionItemTracking {
                 "item_price BIGINT," +
                 "faction_purchased BOOLEAN," +
                 "faction_paid_member VARCHAR(20)," +
-                "payment_request_id VARCHAR(36)," +
                 "notes TEXT," +
                 "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                 ")";
@@ -74,7 +62,6 @@ public class FactionItemTracking {
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_user_id ON " + tableName + "(user_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_faction_purchased ON " + tableName + "(faction_purchased)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_faction_paid_member ON " + tableName + "(faction_paid_member)");
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_" + tableName + "_payment_request_id ON " + tableName + "(payment_request_id)");
 
             logger.debug("Item tracking table {} created or verified with indexes", tableName);
         }
@@ -146,41 +133,6 @@ public class FactionItemTracking {
     }
 
     /**
-     * Log member payment requirement (from Overview/Payment system)
-     */
-    public static void logMemberPaymentRequired(Connection ocDataConnection, String factionSuffix,
-                                                String crimeName, String userId, String username,
-                                                String itemName, Long itemPrice, String paymentRequestId) throws SQLException {
-        String tableName = "item_tracking_" + factionSuffix;
-
-        // Create table if it doesn't exist
-        createItemTrackingTable(ocDataConnection, factionSuffix);
-
-        String insertSql = "INSERT INTO " + tableName + " (" +
-                "crime_name, user_id, username, item_name, item_price, faction_purchased, " +
-                "faction_paid_member, payment_request_id, notes, last_updated) " +
-                "VALUES (?, ?, ?, ?, ?, FALSE, 'PENDING', ?, ?, CURRENT_TIMESTAMP)";
-
-        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(insertSql)) {
-            pstmt.setString(1, crimeName);
-            pstmt.setString(2, userId);
-            pstmt.setString(3, username);
-            pstmt.setString(4, itemName);
-            if (itemPrice != null) {
-                pstmt.setLong(5, itemPrice);
-            } else {
-                pstmt.setNull(5, Types.BIGINT);
-            }
-            pstmt.setString(6, paymentRequestId);
-            pstmt.setString(7, "Member payment");
-
-            pstmt.executeUpdate();
-            logger.debug("Logged member payment requirement: {} for user {} in crime {} (request: {})",
-                    itemName, username, crimeName, paymentRequestId); // Now shows full 6-digit ID
-        }
-    }
-
-    /**
      * Log item transfer request between users (for high-value reusable items)
      */
     public static void logItemTransferRequest(Connection ocDataConnection, String factionSuffix,
@@ -248,49 +200,6 @@ public class FactionItemTracking {
     }
 
     /**
-     * Update payment status when payment request is fulfilled
-     */
-    public static boolean updatePaymentRequestFulfilled(Connection ocDataConnection, String paymentRequestId) throws SQLException {
-        if (paymentRequestId == null || paymentRequestId.trim().isEmpty()) {
-            return false;
-        }
-
-        // Get all faction suffixes to search across all tracking tables
-        List<String> factionSuffixes = getAllFactionSuffixes(ocDataConnection);
-
-        boolean updated = false;
-
-        for (String factionSuffix : factionSuffixes) {
-            String tableName = "item_tracking_" + factionSuffix;
-
-            try {
-                String updateSql = "UPDATE " + tableName + " SET " +
-                        "faction_paid_member = 'FULFILLED', " +
-                        "notes = COALESCE(notes, '') || ' - Payment fulfilled', " +
-                        "last_updated = CURRENT_TIMESTAMP " +
-                        "WHERE payment_request_id = ? AND faction_paid_member = 'PENDING'";
-
-                try (PreparedStatement pstmt = ocDataConnection.prepareStatement(updateSql)) {
-                    pstmt.setString(1, paymentRequestId);
-
-                    int rowsAffected = pstmt.executeUpdate();
-                    if (rowsAffected > 0) {
-                        updated = true;
-                        logger.info("Updated item tracking: payment request {} marked as fulfilled (table: {})",
-                                paymentRequestId, tableName);
-                    }
-                }
-            } catch (SQLException e) {
-                logger.debug("Could not update table {} for payment request {}: {}",
-                        tableName, paymentRequestId, e.getMessage());
-                // Continue to next table
-            }
-        }
-
-        return updated;
-    }
-
-    /**
      * Get faction spending summary for a specific period
      */
     public static FactionSpendingSummary getFactionSpendingSummary(Connection ocDataConnection, String factionSuffix,
@@ -324,33 +233,6 @@ public class FactionItemTracking {
         }
 
         return new FactionSpendingSummary(0, 0, 0, 0L, 0L);
-    }
-
-    /**
-     * Get all faction suffixes from existing tables
-     */
-    private static List<String> getAllFactionSuffixes(Connection ocDataConnection) {
-        java.util.List<String> suffixes = new java.util.ArrayList<>();
-
-        // Query information_schema to find all item_tracking tables
-        String sql = "SELECT table_name FROM information_schema.tables " +
-                "WHERE table_schema = 'public' AND table_name LIKE 'item_tracking_%'";
-
-        try (PreparedStatement pstmt = ocDataConnection.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-
-            while (rs.next()) {
-                String tableName = rs.getString("table_name");
-                String suffix = tableName.substring("item_tracking_".length());
-                if (isValidDbSuffix(suffix)) {
-                    suffixes.add(suffix);
-                }
-            }
-        } catch (SQLException e) {
-            logger.error("Error getting faction suffixes from item tracking tables", e);
-        }
-
-        return suffixes;
     }
 
     /**

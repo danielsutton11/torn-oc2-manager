@@ -245,6 +245,12 @@ public class CheckUsersHaveItems {
             // Get users who need items they don't have
             List<UserItemRequest> allItemRequests = getUsersNeedingItems(ocDataConnection, overviewTableName);
 
+            // Merge in users who newly joined a crime with the item already in their inventory,
+            // detected since the last overview update run
+            List<UserItemRequest> pendingNotifications = PendingItemNotificationDAO.getNotificationsForFaction(
+                    configConnection, factionInfo.getFactionId());
+            allItemRequests.addAll(pendingNotifications);
+
             if (allItemRequests.isEmpty()) {
                 logger.debug("No item requests found for faction {}", factionInfo.getFactionId());
                 return CheckItemsResult.success(0, 0, false, false);
@@ -344,6 +350,16 @@ public class CheckUsersHaveItems {
             // Send transfer requests
             if (!transferRequests.isEmpty()) {
                 transferNotificationSent = sendTransferNotifications(factionInfo.getFactionId(), transferRequests);
+            }
+
+            // Clear pending notifications now that they have been included in the Discord send
+            if (!pendingNotifications.isEmpty()) {
+                try {
+                    PendingItemNotificationDAO.deleteNotificationsForFaction(configConnection, factionInfo.getFactionId());
+                } catch (SQLException e) {
+                    logger.warn("Failed to clear pending item notifications for faction {}: {}",
+                            factionInfo.getFactionId(), e.getMessage());
+                }
             }
 
             return CheckItemsResult.success(regularItemRequests.size(), transferRequests.size(), regularNotificationSent, transferNotificationSent);
